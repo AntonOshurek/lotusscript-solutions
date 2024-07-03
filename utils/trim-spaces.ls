@@ -1,6 +1,6 @@
 %REM
 	Library trim-symbols-in-string
-	Created Jun 13, 2024 by Grzegorz Pawlak/Ext/PL/EMEA/HENKEL
+	Created Jun 13, 2024 by 
 	Description: Comments for Library
 %END REM
 Option Public
