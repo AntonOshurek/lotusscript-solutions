@@ -1,6 +1,6 @@
 %REM
 	Library libDocViewer
-	Created Jun 21, 2025 by Anton Ashurek/unicorn poznan
+	Created Jun 21, 2025 by Anton Oshurek/unicorn poznan
 	Description: Comments for Library
 %END REM
 Option Public
