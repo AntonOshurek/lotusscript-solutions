@@ -76,6 +76,6 @@ Use "libDocViewer"
 
 ## 🛠️ Author
 
-- Developed by: Anton Ashurek / unicorn poznan  
+- Developed by: Anton Oshurek / unicorn poznan  
 - Date: 2025-06-21  
 - Project: `libDocViewer`
