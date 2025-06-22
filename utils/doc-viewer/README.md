@@ -69,6 +69,6 @@ End Sub
 
 ## 🛠️ Автор
 
-- Разработано: Anton Ashurek / unicorn poznan
+- Разработано: Anton Oshurek / unicorn poznan
 - Дата: 2025-06-21
 - Проект: `libDocViewer`
