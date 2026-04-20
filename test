@@ -1,0 +1,125 @@
+Option Public
+Option Declare
+
+Sub Initialize
+
+    On Error GoTo errHandler
+    
+    Dim s As New NotesSession
+    Dim db As NotesDatabase
+    Set db = s.CurrentDatabase
+    
+    Dim v As NotesView
+    Set v = db.GetView("vwReparentPending")
+    
+    Dim dc As NotesDocumentCollection
+    Set dc = v.GetAllDocumentsByKey("PENDING", True)
+    
+    Dim newDoc As NotesDocument
+    Set newDoc = dc.GetFirstDocument()
+    
+    While Not newDoc Is Nothing
+        
+        On Error GoTo docError
+        
+        Dim prevUNID As String
+        prevUNID = newDoc.GetItemValue("PrevVersionUNID")(0)
+        
+        Dim prevDoc As NotesDocument
+        Set prevDoc = db.GetDocumentByUNID(prevUNID)
+        
+        If prevDoc Is Nothing Then
+            Call SetError(newDoc, "Prev doc not found: " & prevUNID)
+            GoTo nextDoc
+        End If
+        
+        Dim resp As NotesDocumentCollection
+        Set resp = prevDoc.Responses
+        
+        Dim doc As NotesDocument
+        Set doc = resp.GetFirstDocument()
+        
+        Dim canProcess As Boolean
+        canProcess = True
+        
+        ' 🔍 ПРОВЕРКА
+        While Not doc Is Nothing
+            
+            On Error Resume Next
+            Call doc.Save(False, False)
+            
+            If Err <> 0 Then
+                Call SetError(newDoc, _
+                    "Cannot save doc: " & doc.UniversalID & " | " & Error$)
+                canProcess = False
+                Err = 0
+                Exit While
+            End If
+            
+            Err = 0
+            Set doc = resp.GetNextDocument(doc)
+        Wend
+        
+        ' 🚀 ПЕРЕПРИВЯЗКА
+        If canProcess Then
+            
+            Set doc = resp.GetFirstDocument()
+            
+            While Not doc Is Nothing
+                
+                If doc.UniversalID <> newDoc.UniversalID Then
+                    
+                    Call doc.MakeResponse(newDoc)
+                    Call doc.Save(True, False)
+                    
+                End If
+                
+                Set doc = resp.GetNextDocument(doc)
+            Wend
+            
+            Call newDoc.ReplaceItemValue("ReparentStatus", "DONE")
+            
+        Else
+            Call newDoc.ReplaceItemValue("ReparentStatus", "ERROR")
+        End If
+        
+        Call newDoc.ReplaceItemValue("ReparentProcessedAt", Now)
+        Call newDoc.Save(True, False)
+        
+GoTo nextDoc
+
+docError:
+        Call SetError(newDoc, _
+            "Unexpected error: " & CStr(Err) & " | " & Error$)
+        Resume nextDoc
+
+nextDoc:
+        Set newDoc = dc.GetNextDocument(newDoc)
+        
+    Wend
+    
+    Exit Sub
+
+errHandler:
+    Print "Agent error: " & Error$
+    
+End Sub
+
+
+' =========================
+' ЛОГИРОВАНИЕ ОШИБОК
+' =========================
+Sub SetError(doc As NotesDocument, msg As String)
+
+    Dim oldErr As String
+    oldErr = ""
+    
+    If doc.HasItem("ReparentError") Then
+        oldErr = doc.GetItemValue("ReparentError")(0)
+    End If
+    
+    Call doc.ReplaceItemValue("ReparentStatus", "ERROR")
+    Call doc.ReplaceItemValue("ReparentError", _
+        oldErr & Chr(10) & msg)
+    
+End Sub
