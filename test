@@ -3,90 +3,95 @@ Option Declare
 
 Sub Initialize
 
-    Dim s As New NotesSession
-    Dim db As NotesDatabase
-    Set db = s.CurrentDatabase
+    Dim session As New NotesSession
+    Dim database As NotesDatabase
+    Dim pendingView As NotesView
+    Dim pendingCollection As NotesDocumentCollection
+    
+    Dim newVersionDoc As NotesDocument
+    Dim nextNewVersionDoc As NotesDocument
+    
+    Dim previousVersionUNID As String
+    Dim previousVersionDoc As NotesDocument
+    Dim previousVersionsCollection As NotesDocumentCollection
+    
+    Dim previousVersionDocItem As NotesDocument
+    
+    Dim canProcess As Boolean
+    Dim errorText As String
 
-    Dim v As NotesView
-    Set v = db.GetView("vwReparentPending")
-    If v Is Nothing Then Exit Sub
+    Set database = session.CurrentDatabase
+    Set pendingView = database.GetView("vwReparentPending")
+    
+    If pendingView Is Nothing Then Exit Sub
+    
+    Set pendingCollection = pendingView.GetAllDocumentsByKey("PENDING", True)
+    If pendingCollection Is Nothing Then Exit Sub
 
-    Dim dc As NotesDocumentCollection
-    Set dc = v.GetAllDocumentsByKey("PENDING", True)
-    If dc Is Nothing Then Exit Sub
+    Set newVersionDoc = pendingCollection.GetFirstDocument()
 
-    Dim newDoc As NotesDocument
-    Set newDoc = dc.GetFirstDocument()
+    Do While Not newVersionDoc Is Nothing
 
-    Do While Not newDoc Is Nothing
+        Set nextNewVersionDoc = pendingCollection.GetNextDocument(newVersionDoc)
 
-        Dim nextNewDoc As NotesDocument
-        Set nextNewDoc = dc.GetNextDocument(newDoc)
+        canProcess = True
+        errorText = ""
 
-        Dim ok As Boolean
-        Dim errText As String
-        ok = True
-        errText = ""
-
-        ' 1. Сначала проверяем сам newDoc
+        ' 🔍 Проверка new версии
         On Error Resume Next
-        If Not newDoc.Save(False, False) Or Err <> 0 Then
-            errText = "Cannot save new version document: " & newDoc.UniversalID & _
-                      " | Error " & CStr(Err) & ": " & Error$
-            ok = False
+        If Not newVersionDoc.Save(False, False) Or Err <> 0 Then
+            errorText = "Cannot save new version: " & newVersionDoc.UniversalID & _
+                        " | Error " & CStr(Err) & ": " & Error$
+            canProcess = False
         End If
         Err = 0
         On Error GoTo 0
 
-        If ok Then
-
-            ' 2. Ищем предыдущую версию
-            Dim prevUNID As String
-            prevUNID = ""
-
-            If newDoc.HasItem("PrevVersionUNID") Then
-                prevUNID = newDoc.GetItemValue("PrevVersionUNID")(0)
+        ' 🔍 Получаем предыдущую версию
+        If canProcess Then
+            If newVersionDoc.HasItem("PrevVersionUNID") Then
+                previousVersionUNID = newVersionDoc.GetItemValue("PrevVersionUNID")(0)
+            Else
+                previousVersionUNID = ""
             End If
 
-            If prevUNID = "" Then
-                errText = "PrevVersionUNID is empty"
-                ok = False
+            If previousVersionUNID = "" Then
+                errorText = "PrevVersionUNID is empty"
+                canProcess = False
             End If
         End If
 
-        Dim prevDoc As NotesDocument
+        ' 🔍 Загружаем предыдущий документ
+        If canProcess Then
+            Set previousVersionDoc = database.GetDocumentByUNID(previousVersionUNID)
 
-        If ok Then
-            Set prevDoc = db.GetDocumentByUNID(prevUNID)
-
-            If prevDoc Is Nothing Then
-                errText = "Previous version not found: " & prevUNID
-                ok = False
+            If previousVersionDoc Is Nothing Then
+                errorText = "Previous version not found: " & previousVersionUNID
+                canProcess = False
             End If
         End If
 
-        Dim resp As NotesDocumentCollection
+        ' 🔍 Получаем все старые версии
+        If canProcess Then
+            Set previousVersionsCollection = previousVersionDoc.Responses
 
-        If ok Then
-            Set resp = prevDoc.Responses
-            If resp Is Nothing Then
-                errText = "Responses collection is Nothing for doc: " & prevDoc.UniversalID
-                ok = False
+            If previousVersionsCollection Is Nothing Then
+                errorText = "No responses found for: " & previousVersionDoc.UniversalID
+                canProcess = False
             End If
         End If
 
-        ' 3. Полная проверка: можно ли сохранить все документы
-        If ok Then
-            Dim doc As NotesDocument
-            Set doc = resp.GetFirstDocument()
+        ' 🔍 Проверка всех старых документов
+        If canProcess Then
+            Set previousVersionDocItem = previousVersionsCollection.GetFirstDocument()
 
-            Do While Not doc Is Nothing
+            Do While Not previousVersionDocItem Is Nothing
 
                 On Error Resume Next
-                If Not doc.Save(False, False) Or Err <> 0 Then
-                    errText = "Cannot save old version: " & doc.UniversalID & _
-                              " | Error " & CStr(Err) & ": " & Error$
-                    ok = False
+                If Not previousVersionDocItem.Save(False, False) Or Err <> 0 Then
+                    errorText = "Cannot save old version: " & previousVersionDocItem.UniversalID & _
+                                " | Error " & CStr(Err) & ": " & Error$
+                    canProcess = False
                     Err = 0
                     On Error GoTo 0
                     Exit Do
@@ -94,63 +99,65 @@ Sub Initialize
                 Err = 0
                 On Error GoTo 0
 
-                Set doc = resp.GetNextDocument(doc)
+                Set previousVersionDocItem = previousVersionsCollection.GetNextDocument(previousVersionDocItem)
             Loop
         End If
 
-        ' 4. Если все проверки прошли — перепривязываем
-        If ok Then
-            Dim doc2 As NotesDocument
-            Set doc2 = resp.GetFirstDocument()
+        ' 🚀 Перепривязка
+        If canProcess Then
+            Set previousVersionDocItem = previousVersionsCollection.GetFirstDocument()
 
-            Do While Not doc2 Is Nothing
+            Do While Not previousVersionDocItem Is Nothing
 
-                If doc2.UniversalID <> newDoc.UniversalID Then
+                If previousVersionDocItem.UniversalID <> newVersionDoc.UniversalID Then
 
                     On Error Resume Next
-                    Call doc2.MakeResponse(newDoc)
+                    Call previousVersionDocItem.MakeResponse(newVersionDoc)
 
                     If Err <> 0 Then
-                        errText = "MakeResponse failed for doc: " & doc2.UniversalID & _
-                                  " | Error " & CStr(Err) & ": " & Error$
-                        ok = False
+                        errorText = "MakeResponse failed: " & previousVersionDocItem.UniversalID & _
+                                    " | Error " & CStr(Err) & ": " & Error$
+                        canProcess = False
                         Err = 0
                         On Error GoTo 0
                         Exit Do
                     End If
 
-                    If Not doc2.Save(True, False) Or Err <> 0 Then
-                        errText = "Save after MakeResponse failed for doc: " & doc2.UniversalID & _
-                                  " | Error " & CStr(Err) & ": " & Error$
-                        ok = False
+                    If Not previousVersionDocItem.Save(False, False) Or Err <> 0 Then
+                        errorText = "Save after MakeResponse failed: " & previousVersionDocItem.UniversalID & _
+                                    " | Error " & CStr(Err) & ": " & Error$
+                        canProcess = False
                         Err = 0
                         On Error GoTo 0
                         Exit Do
                     End If
+
                     Err = 0
                     On Error GoTo 0
-
                 End If
 
-                Set doc2 = resp.GetNextDocument(doc2)
+                Set previousVersionDocItem = previousVersionsCollection.GetNextDocument(previousVersionDocItem)
             Loop
         End If
 
-        ' 5. Пишем результат в newDoc
+        ' 🧾 Запись результата
         On Error Resume Next
-        If ok Then
-            Call newDoc.ReplaceItemValue("ReparentStatus", "DONE")
-            Call newDoc.ReplaceItemValue("ReparentError", "")
+
+        If canProcess Then
+            Call newVersionDoc.ReplaceItemValue("ReparentStatus", "DONE")
+            Call newVersionDoc.ReplaceItemValue("ReparentError", "")
         Else
-            Call newDoc.ReplaceItemValue("ReparentStatus", "ERROR")
-            Call newDoc.ReplaceItemValue("ReparentError", errText)
+            Call newVersionDoc.ReplaceItemValue("ReparentStatus", "ERROR")
+            Call newVersionDoc.ReplaceItemValue("ReparentError", errorText)
         End If
-        Call newDoc.ReplaceItemValue("ReparentProcessedAt", Now)
-        Call newDoc.Save(True, False)
+
+        Call newVersionDoc.ReplaceItemValue("ReparentProcessedAt", Now)
+        Call newVersionDoc.Save(False, False)
+
         Err = 0
         On Error GoTo 0
 
-        Set newDoc = nextNewDoc
+        Set newVersionDoc = nextNewVersionDoc
     Loop
 
 End Sub
