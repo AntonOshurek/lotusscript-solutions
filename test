@@ -2,7 +2,6 @@ Option Public
 Option Declare
 
 Sub Initialize
-    On Error GoTo errHandler
 
     Dim s As New NotesSession
     Dim db As NotesDatabase
@@ -10,81 +9,148 @@ Sub Initialize
 
     Dim v As NotesView
     Set v = db.GetView("vwReparentPending")
+    If v Is Nothing Then Exit Sub
 
     Dim dc As NotesDocumentCollection
     Set dc = v.GetAllDocumentsByKey("PENDING", True)
+    If dc Is Nothing Then Exit Sub
 
     Dim newDoc As NotesDocument
     Set newDoc = dc.GetFirstDocument()
 
     Do While Not newDoc Is Nothing
 
-        Dim prevUNID As String
-        prevUNID = newDoc.GetItemValue("PrevVersionUNID")(0)
+        Dim nextNewDoc As NotesDocument
+        Set nextNewDoc = dc.GetNextDocument(newDoc)
+
+        Dim ok As Boolean
+        Dim errText As String
+        ok = True
+        errText = ""
+
+        ' 1. Сначала проверяем сам newDoc
+        On Error Resume Next
+        If Not newDoc.Save(False, False) Or Err <> 0 Then
+            errText = "Cannot save new version document: " & newDoc.UniversalID & _
+                      " | Error " & CStr(Err) & ": " & Error$
+            ok = False
+        End If
+        Err = 0
+        On Error GoTo 0
+
+        If ok Then
+
+            ' 2. Ищем предыдущую версию
+            Dim prevUNID As String
+            prevUNID = ""
+
+            If newDoc.HasItem("PrevVersionUNID") Then
+                prevUNID = newDoc.GetItemValue("PrevVersionUNID")(0)
+            End If
+
+            If prevUNID = "" Then
+                errText = "PrevVersionUNID is empty"
+                ok = False
+            End If
+        End If
 
         Dim prevDoc As NotesDocument
-        Set prevDoc = db.GetDocumentByUNID(prevUNID)
 
-        If prevDoc Is Nothing Then
-            Call newDoc.ReplaceItemValue("ReparentStatus", "ERROR")
-            Call newDoc.ReplaceItemValue("ReparentError", "Prev doc not found: " & prevUNID)
-            Call newDoc.Save(True, False)
-            Set newDoc = dc.GetNextDocument(newDoc)
-            GoTo continueLoop
+        If ok Then
+            Set prevDoc = db.GetDocumentByUNID(prevUNID)
+
+            If prevDoc Is Nothing Then
+                errText = "Previous version not found: " & prevUNID
+                ok = False
+            End If
         End If
 
         Dim resp As NotesDocumentCollection
-        Set resp = prevDoc.Responses
 
-        Dim doc As NotesDocument
-        Set doc = resp.GetFirstDocument()
-
-        Dim canProcess As Integer
-        canProcess = True
-
-        ' проверка
-        Do While Not doc Is Nothing
-            On Error Resume Next
-            Call doc.Save(False, False)
-            If Err <> 0 Then
-                Call newDoc.ReplaceItemValue("ReparentStatus", "ERROR")
-                Call newDoc.ReplaceItemValue("ReparentError", _
-                    "Cannot save doc: " & doc.UniversalID & " | Error " & CStr(Err) & ": " & Error$)
-                Call newDoc.Save(True, False)
-                canProcess = False
-                Err = 0
-                On Error GoTo errHandler
-                Exit Do
+        If ok Then
+            Set resp = prevDoc.Responses
+            If resp Is Nothing Then
+                errText = "Responses collection is Nothing for doc: " & prevDoc.UniversalID
+                ok = False
             End If
-            Err = 0
-            On Error GoTo errHandler
-            Set doc = resp.GetNextDocument(doc)
-        Loop
+        End If
 
-        ' перепривязка
-        If canProcess Then
+        ' 3. Полная проверка: можно ли сохранить все документы
+        If ok Then
+            Dim doc As NotesDocument
             Set doc = resp.GetFirstDocument()
 
             Do While Not doc Is Nothing
-                If doc.UniversalID <> newDoc.UniversalID Then
-                    Call doc.MakeResponse(newDoc)
-                    Call doc.Save(True, False)
+
+                On Error Resume Next
+                If Not doc.Save(False, False) Or Err <> 0 Then
+                    errText = "Cannot save old version: " & doc.UniversalID & _
+                              " | Error " & CStr(Err) & ": " & Error$
+                    ok = False
+                    Err = 0
+                    On Error GoTo 0
+                    Exit Do
                 End If
+                Err = 0
+                On Error GoTo 0
+
                 Set doc = resp.GetNextDocument(doc)
             Loop
-
-            Call newDoc.ReplaceItemValue("ReparentStatus", "DONE")
-            Call newDoc.ReplaceItemValue("ReparentError", "")
-            Call newDoc.Save(True, False)
         End If
 
-        Set newDoc = dc.GetNextDocument(newDoc)
+        ' 4. Если все проверки прошли — перепривязываем
+        If ok Then
+            Dim doc2 As NotesDocument
+            Set doc2 = resp.GetFirstDocument()
 
-continueLoop:
+            Do While Not doc2 Is Nothing
+
+                If doc2.UniversalID <> newDoc.UniversalID Then
+
+                    On Error Resume Next
+                    Call doc2.MakeResponse(newDoc)
+
+                    If Err <> 0 Then
+                        errText = "MakeResponse failed for doc: " & doc2.UniversalID & _
+                                  " | Error " & CStr(Err) & ": " & Error$
+                        ok = False
+                        Err = 0
+                        On Error GoTo 0
+                        Exit Do
+                    End If
+
+                    If Not doc2.Save(True, False) Or Err <> 0 Then
+                        errText = "Save after MakeResponse failed for doc: " & doc2.UniversalID & _
+                                  " | Error " & CStr(Err) & ": " & Error$
+                        ok = False
+                        Err = 0
+                        On Error GoTo 0
+                        Exit Do
+                    End If
+                    Err = 0
+                    On Error GoTo 0
+
+                End If
+
+                Set doc2 = resp.GetNextDocument(doc2)
+            Loop
+        End If
+
+        ' 5. Пишем результат в newDoc
+        On Error Resume Next
+        If ok Then
+            Call newDoc.ReplaceItemValue("ReparentStatus", "DONE")
+            Call newDoc.ReplaceItemValue("ReparentError", "")
+        Else
+            Call newDoc.ReplaceItemValue("ReparentStatus", "ERROR")
+            Call newDoc.ReplaceItemValue("ReparentError", errText)
+        End If
+        Call newDoc.ReplaceItemValue("ReparentProcessedAt", Now)
+        Call newDoc.Save(True, False)
+        Err = 0
+        On Error GoTo 0
+
+        Set newDoc = nextNewDoc
     Loop
 
-    Exit Sub
-
-errHandler:
-    Print "Agent error: " & CStr(Err) & " | " & Error$ & " | line " & CStr(Erl)
 End Sub
