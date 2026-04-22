@@ -26,9 +26,13 @@ export const authDevInterceptor: HttpInterceptorFn = (req, next) => {
       if ((err.status === 401 || err.status === 403) && !isTokenRequest) {
         tokenStorage.clearToken();
 
-        return from(authService.requestDevToken()).pipe(
-          switchMap((newToken: string) => {
-            tokenStorage.setToken(newToken);
+        return from(authService.login()).pipe(
+          switchMap(() => {
+            const newToken = tokenStorage.getToken();
+
+            if (!newToken) {
+              return throwError(() => err);
+            }
 
             const retryReq = req.clone({
               setHeaders: {
@@ -38,11 +42,11 @@ export const authDevInterceptor: HttpInterceptorFn = (req, next) => {
 
             return next(retryReq);
           }),
-          catchError(() => throwError(() => err))
+          catchError(() => throwError(() => err)),
         );
       }
 
       return throwError(() => err);
-    })
+    }),
   );
 };
