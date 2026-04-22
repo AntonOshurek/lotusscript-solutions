@@ -1,18 +1,24 @@
-import { HttpInterceptorFn } from '@angular/common/http';
+import {
+  HttpErrorResponse,
+  HttpInterceptorFn,
+  HttpRequest,
+} from '@angular/common/http';
 import { inject } from '@angular/core';
 import { catchError, from, switchMap, throwError } from 'rxjs';
 
 import { DevTokenStorageService } from '../model/dev-token-storage.service';
 import { AuthService } from '../services/auth.service';
 
-export const authDevInterceptor: HttpInterceptorFn = (req, next) => {
-  const tokenStorage = inject(DevTokenStorageService);
-  const authService = inject(AuthService);
+let refreshPromise: Promise<void> | null = null;
 
-  const isTokenRequest = req.url.includes('/api/v1/auth/token');
+export const authDevInterceptor: HttpInterceptorFn = (req, next) => {
+  const authService = inject(AuthService);
+  const tokenStorage = inject(DevTokenStorageService);
+
+  const isTokenRequest = req.url.includes('/auth/token');
   const token = tokenStorage.getToken();
 
-  const authReq =
+  const authReq: HttpRequest<unknown> =
     token && !isTokenRequest
       ? req.clone({
           setHeaders: {
@@ -22,31 +28,40 @@ export const authDevInterceptor: HttpInterceptorFn = (req, next) => {
       : req;
 
   return next(authReq).pipe(
-    catchError((err) => {
-      if ((err.status === 401 || err.status === 403) && !isTokenRequest) {
-        tokenStorage.clearToken();
-
-        return from(authService.login()).pipe(
-          switchMap(() => {
-            const newToken = tokenStorage.getToken();
-
-            if (!newToken) {
-              return throwError(() => err);
-            }
-
-            const retryReq = req.clone({
-              setHeaders: {
-                Authorization: `Bearer ${newToken}`,
-              },
-            });
-
-            return next(retryReq);
-          }),
-          catchError(() => throwError(() => err)),
-        );
+    catchError((err: unknown) => {
+      if (!(err instanceof HttpErrorResponse)) {
+        return throwError(() => err);
       }
 
-      return throwError(() => err);
+      if (err.status !== 401 || isTokenRequest) {
+        return throwError(() => err);
+      }
+
+      tokenStorage.clearToken();
+
+      if (!refreshPromise) {
+        refreshPromise = authService.login().finally(() => {
+          refreshPromise = null;
+        });
+      }
+
+      return from(refreshPromise).pipe(
+        switchMap(() => {
+          const newToken = tokenStorage.getToken();
+
+          if (!newToken) {
+            return throwError(() => err);
+          }
+
+          const retryReq = req.clone({
+            setHeaders: {
+              Authorization: `Bearer ${newToken}`,
+            },
+          });
+
+          return next(retryReq);
+        }),
+      );
     }),
   );
 };
