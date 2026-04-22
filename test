@@ -2,11 +2,11 @@ import { HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { catchError, from, switchMap, throwError } from 'rxjs';
 
-import { TokenStorageService } from '@shared/lib/auth/token-storage.service';
-import { AuthService } from '@features/auth/model/auth.service';
+import { DevTokenStorageService } from '../model/dev-token-storage.service';
+import { AuthService } from '../services/auth.service';
 
 export const authDevInterceptor: HttpInterceptorFn = (req, next) => {
-  const tokenStorage = inject(TokenStorageService);
+  const tokenStorage = inject(DevTokenStorageService);
   const authService = inject(AuthService);
 
   const isTokenRequest = req.url.includes('/api/v1/auth/token');
@@ -26,8 +26,10 @@ export const authDevInterceptor: HttpInterceptorFn = (req, next) => {
       if ((err.status === 401 || err.status === 403) && !isTokenRequest) {
         tokenStorage.clearToken();
 
-        return from(authService.refreshDevToken()).pipe(
-          switchMap((newToken) => {
+        return from(authService.requestDevToken()).pipe(
+          switchMap((newToken: string) => {
+            tokenStorage.setToken(newToken);
+
             const retryReq = req.clone({
               setHeaders: {
                 Authorization: `Bearer ${newToken}`,
