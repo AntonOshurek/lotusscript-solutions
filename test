@@ -1,67 +1,28 @@
-import {
-  HttpErrorResponse,
-  HttpInterceptorFn,
-  HttpRequest,
-} from '@angular/common/http';
-import { inject } from '@angular/core';
-import { catchError, from, switchMap, throwError } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
 
-import { DevTokenStorageService } from '../model/dev-token-storage.service';
-import { AuthService } from '../services/auth.service';
+private extractErrorMessage(error: unknown): string {
+  if (error instanceof HttpErrorResponse) {
+    const status = error.status;
 
-let refreshPromise: Promise<void> | null = null;
+    // backend может вернуть строку
+    if (typeof error.error === 'string') {
+      return `[${status}] ${error.error}`;
+    }
 
-export const authDevInterceptor: HttpInterceptorFn = (req, next) => {
-  const authService = inject(AuthService);
-  const tokenStorage = inject(DevTokenStorageService);
+    // backend structured error
+    const message = error.error?.message;
+    const code = error.error?.code;
 
-  const isTokenRequest = req.url.includes('/auth/token');
-  const token = tokenStorage.getToken();
+    if (message || code) {
+      return `[${status}${code ? ` | ${code}` : ''}] ${message ?? 'Unknown error'}`;
+    }
 
-  const authReq: HttpRequest<unknown> =
-    token && !isTokenRequest
-      ? req.clone({
-          setHeaders: {
-            Authorization: `Bearer ${token}`,
-          },
-        })
-      : req;
+    return `[${status}] Request failed`;
+  }
 
-  return next(authReq).pipe(
-    catchError((err: unknown) => {
-      if (!(err instanceof HttpErrorResponse)) {
-        return throwError(() => err);
-      }
+  if (error instanceof Error) {
+    return error.message;
+  }
 
-      if (err.status !== 401 || isTokenRequest) {
-        return throwError(() => err);
-      }
-
-      tokenStorage.clearToken();
-
-      if (!refreshPromise) {
-        refreshPromise = authService.login().finally(() => {
-          refreshPromise = null;
-        });
-      }
-
-      return from(refreshPromise).pipe(
-        switchMap(() => {
-          const newToken = tokenStorage.getToken();
-
-          if (!newToken) {
-            return throwError(() => err);
-          }
-
-          const retryReq = req.clone({
-            setHeaders: {
-              Authorization: `Bearer ${newToken}`,
-            },
-          });
-
-          return next(retryReq);
-        }),
-      );
-    }),
-  );
-};
+  return 'Unknown error';
+}
