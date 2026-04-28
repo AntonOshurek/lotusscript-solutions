@@ -14,8 +14,9 @@ json {   "data": {},   "meta": {},   "errors": [] }
 
 ### Przykład błędu
 
+```json
 json {   "data": null,   "meta": {},   "errors": [     {       "code": "GROUP_NOT_FOUND",       "message": "Nie znaleziono grupy",       "details": {         "groupId": "group-1"       }     }   ] } 
-
+```
 ---
 
 # 1. Pobranie listy grup z rolami
