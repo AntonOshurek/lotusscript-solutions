@@ -1,0 +1,180 @@
+entities/authz/model/authz.types.ts
+export type ResourceCode =
+  | 'APP_ACCESS_CONTROL';
+
+export type ActionCode =
+  | 'VIEW'
+  | 'CREATE'
+  | 'EDIT'
+  | 'DELETE'
+  | 'SEARCH'
+  | 'EXPORT';
+
+export interface EffectivePermission {
+  resourceCode: ResourceCode;
+  actionCode: ActionCode;
+  permitted: boolean;
+  constraints: Record<string, unknown>;
+}
+
+export interface AuthzContext {
+  entityCode: string;
+  entityClass: string;
+  eligibilityStatus: string;
+  highWaterMark: number;
+  effectivePermissions: EffectivePermission[];
+}
+
+entities/authz/api/authz.api.ts
+import { HttpClient } from '@angular/common/http';
+import { inject, Injectable } from '@angular/core';
+import { Observable } from 'rxjs';
+import { AuthzContext } from '../model/authz.types';
+
+@Injectable({ providedIn: 'root' })
+export class AuthzApi {
+  private readonly http = inject(HttpClient);
+
+  getContext(): Observable<AuthzContext> {
+    return this.http.get<AuthzContext>('/api/authz/v1/context');
+  }
+}
+
+
+
+entities/authz/model/authz.store.ts
+import { computed, Injectable, signal } from '@angular/core';
+import { AuthzContext } from './authz.types';
+
+@Injectable({ providedIn: 'root' })
+export class AuthzStore {
+  readonly context = signal<AuthzContext | null>(null);
+  readonly loading = signal(false);
+  readonly loaded = signal(false);
+  readonly error = signal<unknown | null>(null);
+
+  readonly permissions = computed(() =>
+    this.context()?.effectivePermissions ?? []
+  );
+
+  setContext(context: AuthzContext | null): void {
+    this.context.set(context);
+  }
+
+  setLoading(value: boolean): void {
+    this.loading.set(value);
+  }
+
+  setLoaded(value: boolean): void {
+    this.loaded.set(value);
+  }
+
+  setError(error: unknown | null): void {
+    this.error.set(error);
+  }
+
+  reset(): void {
+    this.context.set(null);
+    this.loading.set(false);
+    this.loaded.set(false);
+    this.error.set(null);
+  }
+}
+
+
+
+
+entities/authz/model/authz.service.ts
+import { inject, Injectable } from '@angular/core';
+import { AuthzApi } from '../api/authz.api';
+import { AuthzStore } from './authz.store';
+import { ActionCode, ResourceCode } from './authz.types';
+
+@Injectable({ providedIn: 'root' })
+export class AuthzService {
+  private readonly api = inject(AuthzApi);
+  private readonly store = inject(AuthzStore);
+
+  loadContext(): void {
+    if (this.store.loading() || this.store.loaded()) {
+      return;
+    }
+
+    this.store.setLoading(true);
+    this.store.setError(null);
+
+    this.api.getContext().subscribe({
+      next: context => {
+        this.store.setContext(context);
+        this.store.setLoaded(true);
+      },
+      error: error => {
+        this.store.setContext(null);
+        this.store.setLoaded(false);
+        this.store.setError(error);
+        this.store.setLoading(false);
+      },
+      complete: () => {
+        this.store.setLoading(false);
+      },
+    });
+  }
+
+  can(resourceCode: ResourceCode, actionCode: ActionCode): boolean {
+    return this.store.permissions().some(permission =>
+      permission.resourceCode === resourceCode &&
+      permission.actionCode === actionCode &&
+      permission.permitted === true
+    );
+  }
+
+  hasAny(permissions: Array<[ResourceCode, ActionCode]>): boolean {
+    return permissions.some(([resourceCode, actionCode]) =>
+      this.can(resourceCode, actionCode)
+    );
+  }
+
+  hasAll(permissions: Array<[ResourceCode, ActionCode]>): boolean {
+    return permissions.every(([resourceCode, actionCode]) =>
+      this.can(resourceCode, actionCode)
+    );
+  }
+}
+
+
+entities/authz/ui/can.directive.ts
+import {
+  Directive,
+  effect,
+  inject,
+  input,
+  TemplateRef,
+  ViewContainerRef,
+} from '@angular/core';
+import { AuthzService } from '../model/authz.service';
+import { ActionCode, ResourceCode } from '../model/authz.types';
+
+@Directive({
+  selector: '[appCan]',
+  standalone: true,
+})
+export class CanDirective {
+  private readonly templateRef = inject(TemplateRef<unknown>);
+  private readonly viewContainerRef = inject(ViewContainerRef);
+  private readonly authz = inject(AuthzService);
+
+  readonly appCan = input.required<[ResourceCode, ActionCode]>();
+
+  constructor() {
+    effect(() => {
+      const [resourceCode, actionCode] = this.appCan();
+
+      this.viewContainerRef.clear();
+
+      if (this.authz.can(resourceCode, actionCode)) {
+        this.viewContainerRef.createEmbeddedView(this.templateRef);
+      }
+    });
+  }
+}
+
