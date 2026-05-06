@@ -1,61 +1,40 @@
-import { MtNavigationMenuItem } from '@citi-icg-172888/ng-icgds/navigation-menu';
-import { MtMenuItem } from '@citi-icg-172888/ng-icgds/menu';
-import { AuthzService } from '@entities/authz';
-import { NavItemData } from './nav.types';
+// pages/admin/users-permissions/model/users-permissions.mapper.ts
 
-export function filterNavItemsByPermissions(
-  items: MtNavigationMenuItem[],
-  authz: AuthzService,
-): MtNavigationMenuItem[] {
-  return items
-    .map(item => filterNavigationItem(item, authz))
-    .filter((item): item is MtNavigationMenuItem => item !== null);
-}
+export function mapUsersPermissionsToTreeRows(
+  users: UserPermissionDto[],
+): UserPermissionTreeRow[] {
+  return users.flatMap((user) => {
+    const userRow: UserPermissionTreeRow = {
+      id: `user-${user.id}`,
+      type: 'user',
+      path: [`${user.code}`],
+      code: user.code,
+      name: user.name,
+      status: user.status,
+    };
 
-function filterNavigationItem(
-  item: MtNavigationMenuItem,
-  authz: AuthzService,
-): MtNavigationMenuItem | null {
-  const data = item.data as NavItemData | undefined;
+    const groupRows = user.groups.flatMap((group) => {
+      const groupRow: UserPermissionTreeRow = {
+        id: `user-${user.id}-group-${group.id}`,
+        type: 'group',
+        path: [`${user.code}`, `${group.code}`],
+        code: group.code,
+        description: group.description,
+        status: group.status,
+      };
 
-  if (data?.permission && !authz.can(data.permission.resourceCode, data.permission.actionCode)) {
-    return null;
-  }
+      const roleRows: UserPermissionTreeRow[] = group.roles.map((role) => ({
+        id: `user-${user.id}-group-${group.id}-role-${role.id}`,
+        type: 'role',
+        path: [`${user.code}`, `${group.code}`, `${role.code}`],
+        code: role.code,
+        description: role.description,
+        status: role.status,
+      }));
 
-  const filteredItems = item.items
-    ?.map(child => filterMenuItem(child as MtMenuItem, authz))
-    .filter((child): child is MtMenuItem => child !== null);
+      return [groupRow, ...roleRows];
+    });
 
-  if (item.items && filteredItems?.length === 0) {
-    return null;
-  }
-
-  return {
-    ...item,
-    ...(filteredItems ? { items: filteredItems } : {}),
-  };
-}
-
-function filterMenuItem(
-  item: MtMenuItem,
-  authz: AuthzService,
-): MtMenuItem | null {
-  const data = item.data as NavItemData | undefined;
-
-  if (data?.permission && !authz.can(data.permission.resourceCode, data.permission.actionCode)) {
-    return null;
-  }
-
-  const filteredItems = item.items
-    ?.map(child => filterMenuItem(child, authz))
-    .filter((child): child is MtMenuItem => child !== null);
-
-  if (item.items && filteredItems?.length === 0) {
-    return null;
-  }
-
-  return {
-    ...item,
-    ...(filteredItems ? { items: filteredItems } : {}),
-  };
+    return [userRow, ...groupRows];
+  });
 }
