@@ -1,40 +1,172 @@
-// pages/admin/users-permissions/model/users-permissions.mapper.ts
+// shared/error/lib/format-error-context.ts
 
-export function mapUsersPermissionsToTreeRows(
-  users: UserPermissionDto[],
-): UserPermissionTreeRow[] {
-  return users.flatMap((user) => {
-    const userRow: UserPermissionTreeRow = {
-      id: `user-${user.id}`,
-      type: 'user',
-      path: [`${user.code}`],
-      code: user.code,
-      name: user.name,
-      status: user.status,
+import type { ApiParseErrorContext } from '../model/ui-error.model';
+
+const formatErrorContext = (
+  context?: ApiParseErrorContext,
+): string[] => {
+  if (!context) {
+    return [];
+  }
+
+  return [
+    `Feature: ${context.feature ?? '-'}`,
+    `Endpoint: ${context.method ?? 'GET'} ${context.endpoint}`,
+  ];
+};
+
+export { formatErrorContext };
+
+
+
+import { ZodError, type ZodIssue } from 'zod';
+
+import type {
+  ApiParseErrorContext,
+  UiError,
+} from '@shared/error/model/ui-error.model';
+import { formatErrorContext } from '@shared/error';
+
+const formatPath = (path: ZodIssue['path']): string => {
+  return path.map(String).join('.');
+};
+
+const parseIssue = (issue: ZodIssue): string => {
+  const path = formatPath(issue.path);
+
+  if (issue.code === 'invalid_value') {
+    return [
+      `Path: ${path}`,
+      `Code: ${issue.code}`,
+      'Received value is not allowed',
+      `Expected values: ${issue.values?.join(' | ')}`,
+      `Zod message: ${issue.message}`,
+    ].join('\n');
+  }
+
+  return [
+    `Path: ${path}`,
+    `Code: ${issue.code}`,
+    `Zod message: ${issue.message}`,
+  ].join('\n');
+};
+
+const parseZodErrorToUiError = (
+  error: unknown,
+  title: string,
+  context?: ApiParseErrorContext,
+): UiError => {
+  if (!(error instanceof ZodError)) {
+    return {
+      title,
+      message: 'Unexpected error while parsing server response.',
+      details: formatErrorContext(context),
     };
+  }
 
-    const groupRows = user.groups.flatMap((group) => {
-      const groupRow: UserPermissionTreeRow = {
-        id: `user-${user.id}-group-${group.id}`,
-        type: 'group',
-        path: [`${user.code}`, `${group.code}`],
-        code: group.code,
-        description: group.description,
-        status: group.status,
-      };
+  return {
+    title,
+    message: 'Server response does not match frontend schema.',
+    details: [
+      ...formatErrorContext(context),
+      ...error.issues.map(parseIssue),
+    ],
+  };
+};
 
-      const roleRows: UserPermissionTreeRow[] = group.roles.map((role) => ({
-        id: `user-${user.id}-group-${group.id}-role-${role.id}`,
-        type: 'role',
-        path: [`${user.code}`, `${group.code}`, `${role.code}`],
-        code: role.code,
-        description: role.description,
-        status: role.status,
-      }));
+export { parseZodErrorToUiError };
 
-      return [groupRow, ...roleRows];
-    });
 
-    return [userRow, ...groupRows];
-  });
-}
+
+
+
+import { HttpErrorResponse } from '@angular/common/http';
+
+import type {
+  ApiParseErrorContext,
+  UiError,
+} from '@shared/error';
+import { formatErrorContext } from '@shared/error';
+
+const extractErrorMessage = (error: unknown): string => {
+  if (error instanceof HttpErrorResponse) {
+    const status = error.status;
+    const message = error.message;
+
+    return `[${status ? `${status}` : 'Unknown status code'}] ${
+      message ?? 'Unknown error'
+    }`;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return 'Unknown error';
+};
+
+const parseApiErrorToUi = (
+  error: HttpErrorResponse,
+  title: string,
+  context?: ApiParseErrorContext,
+): UiError => {
+  return {
+    title,
+    message: extractErrorMessage(error),
+    details: [
+      ...formatErrorContext(context),
+      `Status: ${error.status || 'Nieznany status błędu'}`,
+      `Status text: ${error.statusText || 'Nieznana treść status błędu'}`,
+      `URL: ${error.url ?? '-'}`,
+    ],
+  };
+};
+
+export { extractErrorMessage, parseApiErrorToUi };
+
+
+
+
+
+import { HttpErrorResponse } from '@angular/common/http';
+import { ZodError } from 'zod';
+
+import type {
+  ApiParseErrorContext,
+  UiError,
+} from '@shared/error';
+import { parseApiErrorToUi } from '@shared/api';
+import { parseZodErrorToUiError } from '@shared/validation';
+
+const mapErrorToUiError = (
+  error: unknown,
+  fallbackTitle = 'Wystąpił błąd',
+  context?: ApiParseErrorContext,
+): UiError => {
+  if (error instanceof HttpErrorResponse) {
+    return parseApiErrorToUi(error, fallbackTitle, context);
+  }
+
+  if (error instanceof ZodError) {
+    return parseZodErrorToUiError(error, fallbackTitle, context);
+  }
+
+  if (error instanceof Error) {
+    return {
+      title: fallbackTitle,
+      message: error.message,
+      details: [
+        ...formatErrorContext(context),
+        `Name: ${error.name}`,
+      ],
+    };
+  }
+
+  return {
+    title: fallbackTitle,
+    message: 'Wystąpił nieoczekiwany błąd.',
+    details: formatErrorContext(context),
+  };
+};
+
+export { mapErrorToUiError };
