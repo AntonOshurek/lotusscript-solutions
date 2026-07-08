@@ -1,57 +1,66 @@
-protected serverSideDatasource: IServerSideDatasource = {
-  getRows: (params: IServerSideGetRowsParams) => {
-    const groupKeys = params.request.groupKeys ?? [];
+import { inject, Injectable } from '@angular/core';
 
-    if (groupKeys.length === 0) {
-      const pageSize = 20;
-      const startRow = params.request.startRow ?? 0;
-      const page = Math.floor(startRow / pageSize);
+import {
+  UpdateTransactionPcFeature,
+  type UpdateTransactionPcField,
+} from '@features/transaction-pc/update-transaction-pc';
 
-      this.attributeService
-        .loadProfilesAttributesPage({
-          page,
-          size: pageSize,
-        })
-        .subscribe({
-          next: response => {
-            this.pageCache.clear();
+import {
+  TRANSACTION_FIELDS,
+  type TransactionPc,
+  type TransactionPcFieldName,
+} from '@entities/transaction-pc';
 
-            const rowData: UsersAttributesTreeRow[] = response.data.map(profile => {
-              this.pageCache.set(profile.user.soeId, profile);
+@Injectable()
+export class UpdateTransactionPcFacade {
+  private readonly updateTransactionPcFeature = inject(
+    UpdateTransactionPcFeature,
+  );
 
-              return {
-                id: `user-${profile.user.soeId}`,
-                groupKey: profile.user.soeId,
-                type: 'Użytkownik',
-              };
-            });
+  public updateRow(payload: {
+    original: TransactionPc;
+    updated: TransactionPc;
+  }): void {
+    const fields = this.getChangedFields(payload.original, payload.updated);
 
-            params.success({
-              rowData,
-              rowCount: response.page?.totalItems ?? rowData.length,
-            });
-          },
-          error: () => params.fail(),
-        });
-
+    if (fields.length === 0) {
       return;
     }
 
-    const userSoeId = groupKeys[0];
-    const profile = this.pageCache.get(userSoeId);
-
-    const rowData: UsersAttributesTreeRow[] =
-      profile?.attributes.map(attribute => ({
-        id: `user-${userSoeId}-attribute-${attribute.attributeName}`,
-        type: 'Atrybut',
-        attributeName: attribute.attributeName,
-        validFrom: attribute.validFrom,
-        value: attribute.value,
-      })) ?? [];
-
-    params.success({
-      rowData,
-      rowCount: rowData.length,
+    this.updateTransactionPcFeature.update({
+      row: payload.updated,
+      fields,
+      makerReason: 'Transaction PC edit',
+    }).subscribe({
+      next: () => {
+        // success toast / refresh
+      },
+      error: () => {
+        // error toast / rollback
+      },
     });
-  },
-};
+  }
+
+  private getChangedFields(
+    original: TransactionPc,
+    updated: TransactionPc,
+  ): UpdateTransactionPcField[] {
+    return Object.keys(TRANSACTION_FIELDS)
+      .map((field) => field as TransactionPcFieldName)
+      .filter((field) => TRANSACTION_FIELDS[field].editable)
+      .filter((field) => original[field] !== updated[field])
+      .map((field) => {
+        const value = updated[field];
+
+        return {
+          field,
+          value,
+          op: this.isEmptyValue(value) ? 'CLEAR' : 'SET',
+        };
+      });
+  }
+
+  private isEmptyValue(value: unknown): boolean {
+    return value === null || value === undefined || value === '';
+  }
+}
