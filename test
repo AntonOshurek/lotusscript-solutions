@@ -1,48 +1,41 @@
-export interface ChangeConfirmHtmlField {
+import type { GcmFieldKind, GcmFieldOperation } from '@shared/gsm';
+
+interface Field {
   label: string;
-  oldValue: unknown;
-  newValue: unknown;
-  isClear: boolean;
+  gcmFieldKind: GcmFieldKind;
+  editable: boolean;
 }
 
-export interface CreateChangeConfirmHtmlPayload {
-  message: string;
-  recordLabel: string;
-  recordId: string;
-  fields: ChangeConfirmHtmlField[];
+interface ChangedFieldPayload<T> {
+  name: keyof T;
+  op: GcmFieldOperation;
+  kind: GcmFieldKind;
+  value: unknown;
 }
 
-export function createChangeConfirmHtml(
-  payload: CreateChangeConfirmHtmlPayload,
-): string {
-  const fieldsHtml = payload.fields
+const getChangedFields = <T extends Record<string, unknown>>(
+  original: T,
+  updated: T,
+  fields: Partial<Record<keyof T, Field>>,
+): ChangedFieldPayload<T>[] => {
+  return (Object.keys(fields) as Array<keyof T>)
+    .filter((field) => fields[field]?.editable)
+    .filter((field) => original[field] !== updated[field])
     .map((field) => {
-      const oldValue = formatChangeConfirmValue(field.oldValue);
-      const newValue = field.isClear
-        ? 'Wartość zostanie usunięta'
-        : formatChangeConfirmValue(field.newValue);
+      const value = updated[field];
 
-      return `
-        <li>
-          <b>${field.label}</b><br/>
-          Stara wartość: <b>${oldValue}</b><br/>
-          Nowa wartość: <b>${newValue}</b>
-        </li>
-      `;
-    })
-    .join('');
+      return {
+        name: field,
+        op: isEmptyValue(value) ? 'CLEAR' : 'SET',
+        kind: fields[field]!.gcmFieldKind,
+        value,
+      };
+    });
+};
 
-  return `
-    <p>${payload.message}</p>
-    <p><b>${payload.recordLabel}:</b> ${payload.recordId}</p>
-    <ul>${fieldsHtml}</ul>
-  `;
-}
+const isEmptyValue = (value: unknown): boolean => {
+  return value === null || value === undefined || value === '';
+};
 
-function formatChangeConfirmValue(value: unknown): string {
-  if (value === null || value === undefined || value === '') {
-    return 'Brak wartości';
-  }
-
-  return String(value);
-}
+export type { Field, ChangedFieldPayload };
+export { getChangedFields };
