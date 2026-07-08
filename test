@@ -1,51 +1,48 @@
-private createConfirmHtml(
+export interface ChangeConfirmHtmlField {
+  label: string;
+  oldValue: unknown;
+  newValue: unknown;
+  isClear: boolean;
+}
 
-  payload: UpdateRowPayload,
+export interface CreateChangeConfirmHtmlPayload {
+  message: string;
+  recordLabel: string;
+  recordId: string;
+  fields: ChangeConfirmHtmlField[];
+}
 
-  fields: UpdateTransactionPcPayloadField[],
-
+export function createChangeConfirmHtml(
+  payload: CreateChangeConfirmHtmlPayload,
 ): string {
-
-  const changedFieldsHtml = fields
-
+  const fieldsHtml = payload.fields
     .map((field) => {
-
-      const label = TRANSACTION_FIELDS[field.field].label;
-
-      const oldValue = this.formatValue(payload.original[field.field]);
-
-      const newValue = field.op === 'CLEAR'
-
+      const oldValue = formatChangeConfirmValue(field.oldValue);
+      const newValue = field.isClear
         ? 'Wartość zostanie usunięta'
-
-        : this.formatValue(field.value);
+        : formatChangeConfirmValue(field.newValue);
 
       return `
-
         <li>
-
-          <b>${label}</b><br/>
-
+          <b>${field.label}</b><br/>
           Stara wartość: <b>${oldValue}</b><br/>
-
           Nowa wartość: <b>${newValue}</b>
-
         </li>
-
       `;
-
     })
-
     .join('');
 
   return `
-
-    <p>Czy na pewno chcesz zmienić wartości rekordu transakcji PC?</p>
-
-    <p><b>ID transakcji:</b> ${payload.updated.transaction_id}</p>
-
-    <ul>${changedFieldsHtml}</ul>
-
+    <p>${payload.message}</p>
+    <p><b>${payload.recordLabel}:</b> ${payload.recordId}</p>
+    <ul>${fieldsHtml}</ul>
   `;
+}
 
+function formatChangeConfirmValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') {
+    return 'Brak wartości';
+  }
+
+  return String(value);
 }
