@@ -1,66 +1,51 @@
-import { inject, Injectable } from '@angular/core';
+private createConfirmHtml(
 
-import {
-  UpdateTransactionPcFeature,
-  type UpdateTransactionPcField,
-} from '@features/transaction-pc/update-transaction-pc';
+  payload: UpdateRowPayload,
 
-import {
-  TRANSACTION_FIELDS,
-  type TransactionPc,
-  type TransactionPcFieldName,
-} from '@entities/transaction-pc';
+  fields: UpdateTransactionPcPayloadField[],
 
-@Injectable()
-export class UpdateTransactionPcFacade {
-  private readonly updateTransactionPcFeature = inject(
-    UpdateTransactionPcFeature,
-  );
+): string {
 
-  public updateRow(payload: {
-    original: TransactionPc;
-    updated: TransactionPc;
-  }): void {
-    const fields = this.getChangedFields(payload.original, payload.updated);
+  const changedFieldsHtml = fields
 
-    if (fields.length === 0) {
-      return;
-    }
+    .map((field) => {
 
-    this.updateTransactionPcFeature.update({
-      row: payload.updated,
-      fields,
-      makerReason: 'Transaction PC edit',
-    }).subscribe({
-      next: () => {
-        // success toast / refresh
-      },
-      error: () => {
-        // error toast / rollback
-      },
-    });
-  }
+      const label = TRANSACTION_FIELDS[field.field].label;
 
-  private getChangedFields(
-    original: TransactionPc,
-    updated: TransactionPc,
-  ): UpdateTransactionPcField[] {
-    return Object.keys(TRANSACTION_FIELDS)
-      .map((field) => field as TransactionPcFieldName)
-      .filter((field) => TRANSACTION_FIELDS[field].editable)
-      .filter((field) => original[field] !== updated[field])
-      .map((field) => {
-        const value = updated[field];
+      const oldValue = this.formatValue(payload.original[field.field]);
 
-        return {
-          field,
-          value,
-          op: this.isEmptyValue(value) ? 'CLEAR' : 'SET',
-        };
-      });
-  }
+      const newValue = field.op === 'CLEAR'
 
-  private isEmptyValue(value: unknown): boolean {
-    return value === null || value === undefined || value === '';
-  }
+        ? 'Wartość zostanie usunięta'
+
+        : this.formatValue(field.value);
+
+      return `
+
+        <li>
+
+          <b>${label}</b><br/>
+
+          Stara wartość: <b>${oldValue}</b><br/>
+
+          Nowa wartość: <b>${newValue}</b>
+
+        </li>
+
+      `;
+
+    })
+
+    .join('');
+
+  return `
+
+    <p>Czy na pewno chcesz zmienić wartości rekordu transakcji PC?</p>
+
+    <p><b>ID transakcji:</b> ${payload.updated.transaction_id}</p>
+
+    <ul>${changedFieldsHtml}</ul>
+
+  `;
+
 }
