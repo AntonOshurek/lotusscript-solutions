@@ -1,104 +1,53 @@
-// gcm-change.model.ts
+// row-edit.models.ts
 
 import { z } from 'zod';
 
-type GcmTargetCode =
+type RowEditTarget =
   | 'AMLDB_PC'
   | 'AMLDB_ACC'
   | 'AMLDB_CUST_GOLDEN'
   | 'AMLDB_PS_GOLDEN';
 
-type GcmRowEditValue = string | number | null;
+type RowEditValue = string | number | null;
 
-type GcmRowEditNewValues = Record<string, GcmRowEditValue>;
+type RowEditValues = Record<string, RowEditValue>;
 
-interface GcmRowEditRow {
+interface RowEdit {
   pkValue: string;
-  expectedVersion: number;
-  newValues: GcmRowEditNewValues;
+  expectedVersion?: number;
+  newValues: RowEditValues;
 }
 
-interface GcmRowEditProposeRequest {
-  targetCode: GcmTargetCode;
-  rows: GcmRowEditRow[];
+interface CreateRowEditRequest {
+  targetCode: RowEditTarget;
   clientKey: string;
   onBehalfOf?: string;
+  rows: RowEdit[];
 }
 
-interface GcmRowEditProposeResponse {
-  data: {
-    requestId: string;
-    workflowInstanceId?: string[];
-  };
-}
-
-interface GcmUpdateFeaturePayload<
-  TField extends string,
-> {
-  targetCode: GcmTargetCode;
-  pkValue: string;
-  expectedVersion: number;
-  newValues: Partial<
-    Record<TField, GcmRowEditValue>
-  >;
-  clientKey: string;
-  onBehalfOf?: string;
-}
-
-const gcmTargetCodeSchema = z.enum([
-  'AMLDB_PC',
-  'AMLDB_ACC',
-  'AMLDB_CUST_GOLDEN',
-  'AMLDB_PS_GOLDEN',
-]);
-
-const gcmRowEditValueSchema = z.union([
-  z.string(),
-  z.number(),
-  z.null(),
-]);
-
-const gcmRowEditNewValuesSchema = z.record(
-  z.string(),
-  gcmRowEditValueSchema,
-);
-
-const gcmRowEditRowSchema = z.object({
-  pkValue: z.string().min(1).max(512),
-  expectedVersion: z.number().int(),
-  newValues: gcmRowEditNewValuesSchema,
-});
-
-const gcmRowEditProposeRequestSchema = z.object({
-  targetCode: gcmTargetCodeSchema,
-  rows: z
-    .array(gcmRowEditRowSchema)
-    .min(1)
-    .max(25),
-  clientKey: z.string().min(1).max(128),
-  onBehalfOf: z.string().optional(),
-});
-
-const gcmRowEditProposeResponseSchema = z.object({
+/*
+ * Zod используется только для ответа сервера.
+ */
+const createRowEditResponseSchema = z.object({
   data: z.object({
     requestId: z.string(),
-    workflowInstanceId: z
-      .array(z.string())
-      .optional(),
+    workflowInstanceId: z.array(z.string()).optional(),
   }),
 });
 
+type CreateRowEditResponse = z.infer<
+  typeof createRowEditResponseSchema
+>;
+
 export type {
-  GcmTargetCode,
-  GcmRowEditValue,
-  GcmRowEditNewValues,
-  GcmRowEditRow,
-  GcmRowEditProposeRequest,
-  GcmRowEditProposeResponse,
-  GcmUpdateFeaturePayload,
+  RowEditTarget,
+  RowEditValue,
+  RowEditValues,
+  RowEdit,
+  CreateRowEditRequest,
+  CreateRowEditResponse,
 };
 
 export {
-  gcmRowEditProposeRequestSchema,
-  gcmRowEditProposeResponseSchema,
+  createRowEditResponseSchema,
 };
