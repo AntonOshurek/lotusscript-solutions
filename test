@@ -1,241 +1,96 @@
 import { inject, Injectable } from '@angular/core';
-import type { Observable } from 'rxjs';
 
-// ERROR
-import { mapErrorToUiError } from '@shared/error';
-// FIELD
-import type { Field } from '@shared/field';
-// MODAL
-import { MtModalService } from '@citi-icg-172888/ng-icgds/modal';
+// ENTITIES
+import {
+  ACCOUNT_FIELDS,
+  type Account,
+} from '@entities/account';
+// FEATURES
+import {
+  UpdateAccountFeature,
+} from '@features/account';
+// TABLE
+import {
+  EditableRowChangeService,
+  type EditableRowChangePayload,
+} from '@shared/table';
+
+@Injectable()
+export class UpdateAccountFacade {
+  private readonly editableRowChangeService =
+    inject(EditableRowChangeService);
+
+  private readonly updateAccountFeature =
+    inject(UpdateAccountFeature);
+
+  public updateRow(
+    payload: EditableRowChangePayload<Account>,
+  ): void {
+    this.editableRowChangeService.handle(payload, {
+      fieldNames: ACCOUNT_FIELDS,
+
+      getRecordId: row => String(row.account_id),
+
+      confirmTitle: 'Potwierdź zmianę konta',
+      confirmMessage:
+        'Czy na pewno chcesz zmienić wartości rekordu konta?',
+      recordLabel: 'Id konta',
+
+      successTitle: 'Zapisano zmianę',
+      successHtml:
+        '<p>Zmiany rekordu konta zostały zapisane.</p>',
+
+      errorTitle: 'Nieudana próba zmiany rekordu',
+      errorMessage:
+        'Nie udało się zapisać rekordu konta',
+
+      submit: (updated, newValues) =>
+        this.updateAccountFeature.update({
+          pkValue: String(updated.account_id),
+          expectedVersion: updated.version,
+          newValues,
+        }),
+    });
+  }
+}
+
+
+
+
+import { inject, Injectable } from '@angular/core';
+
 // ROW EDIT
-import type {
-  RowEditField,
-  RowEditValue,
+import {
+  RowEditApiService,
+  type RowEditRequest,
 } from '@shared/row-edit';
-
-interface EditableRowChangePayload<
-  T extends Record<string, unknown>,
-> {
-  original: T;
-  updated: T;
-  onSuccess?: () => void;
-  onError?: () => void;
-  onCancel?: () => void;
-}
-
-interface EditableRowChangeConfig<
-  T extends Record<string, unknown>,
-  TResponse,
-> {
-  fieldNames: Partial<Record<keyof T, Field>>;
-  getRecordId: (row: T) => string;
-
-  confirmTitle: string;
-  confirmMessage: string;
-  recordLabel: string;
-
-  successTitle: string;
-  successHtml: string;
-
-  errorTitle: string;
-  errorMessage: string;
-
-  submit: (
-    updated: T,
-    newValues: RowEditField<Extract<keyof T, string>>,
-  ) => Observable<TResponse>;
-}
+// MODEL
+import type {
+  UpdateAccountFeaturePayload,
+} from './model/update-account.feature.payload';
 
 @Injectable({
   providedIn: 'root',
 })
-export class EditableRowChangeService {
-  private readonly modalService = inject(MtModalService);
+export class UpdateAccountFeature {
+  private readonly rowEditApiService =
+    inject(RowEditApiService);
 
-  public handle<
-    T extends Record<string, unknown>,
-    TResponse,
-  >(
-    payload: EditableRowChangePayload<T>,
-    config: EditableRowChangeConfig<T, TResponse>,
-  ): void {
-    const changedFields = this.getChangedFields(
-      payload.original,
-      payload.updated,
-      config.fieldNames,
-    );
+  public update(
+    payload: UpdateAccountFeaturePayload,
+  ) {
+    const request: RowEditRequest = {
+      targetCode: 'AMLDB_ACC',
+      clientKey: crypto.randomUUID(),
+      rows: [
+        {
+          pkValue: payload.pkValue,
+          expectedVersion: payload.expectedVersion,
+          newValues: payload.newValues,
+        },
+      ],
+    };
 
-    if (changedFields.length === 0) {
-      return;
-    }
-
-    this.modalService.open({
-      status: 'warning',
-      title: config.confirmTitle,
-      html: this.createConfirmHtml({
-        message: config.confirmMessage,
-        recordLabel: config.recordLabel,
-        recordId: config.getRecordId(payload.updated),
-        fields: changedFields.map(field => ({
-          label:
-            config.fieldNames[field.name]?.label ??
-            String(field.name),
-          oldValue: field.oldValue,
-          newValue: field.newValue,
-        })),
-      }),
-      type: 'confirm',
-      afterUserAction: event => {
-        if (event.action === 'accept') {
-          const newValues = this.createNewValues(changedFields);
-
-          this.submit(
-            payload,
-            config,
-            newValues,
-          );
-
-          return;
-        }
-
-        payload.onCancel?.();
-      },
-    });
-  }
-
-  private submit<
-    T extends Record<string, unknown>,
-    TResponse,
-  >(
-    payload: EditableRowChangePayload<T>,
-    config: EditableRowChangeConfig<T, TResponse>,
-    newValues: RowEditField<Extract<keyof T, string>>,
-  ): void {
-    config.submit(payload.updated, newValues).subscribe({
-      next: () => {
-        this.modalService.open({
-          status: 'success',
-          title: config.successTitle,
-          html: config.successHtml,
-          type: 'alert',
-        });
-
-        payload.onSuccess?.();
-      },
-      error: (error: unknown) => {
-        const uiError = mapErrorToUiError(
-          error,
-          config.errorMessage,
-        );
-
-        this.modalService.open({
-          status: 'danger',
-          title: config.errorTitle,
-          html: `
-            <p>${uiError.title}</p>
-            <p>${uiError.message}</p>
-          `,
-          type: 'alert',
-        });
-
-        payload.onError?.();
-      },
-    });
-  }
-
-  private getChangedFields<
-    T extends Record<string, unknown>,
-  >(
-    original: T,
-    updated: T,
-    fields: Partial<Record<keyof T, Field>>,
-  ): Array<{
-    name: Extract<keyof T, string>;
-    oldValue: RowEditValue;
-    newValue: RowEditValue;
-  }> {
-    return (
-      Object.keys(fields) as Array<Extract<keyof T, string>>
-    )
-      .filter(fieldName => fields[fieldName]?.editable)
-      .filter(
-        fieldName =>
-          original[fieldName] !== updated[fieldName],
-      )
-      .map(fieldName => ({
-        name: fieldName,
-        oldValue: original[fieldName] as RowEditValue,
-        newValue: updated[fieldName] as RowEditValue,
-      }));
-  }
-
-  private createNewValues<
-    TFieldName extends string,
-  >(
-    changedFields: Array<{
-      name: TFieldName;
-      newValue: RowEditValue;
-    }>,
-  ): RowEditField<TFieldName> {
-    return changedFields.reduce<RowEditField<TFieldName>>(
-      (newValues, field) => {
-        newValues[field.name] = field.newValue;
-
-        return newValues;
-      },
-      {},
-    );
-  }
-
-  private createConfirmHtml(
-    payload: {
-      message: string;
-      recordLabel: string;
-      recordId: string;
-      fields: Array<{
-        label: string;
-        oldValue: RowEditValue;
-        newValue: RowEditValue;
-      }>;
-    },
-  ): string {
-    const fieldsHtml = payload.fields
-      .map(field => {
-        const oldValue = this.formatValue(field.oldValue);
-
-        const newValue =
-          field.newValue === null
-            ? 'Wartość zostanie usunięta'
-            : this.formatValue(field.newValue);
-
-        return `
-          <li>
-            <b>${field.label}</b><br/>
-            Stara wartość: <b>${oldValue}</b><br/>
-            Nowa wartość: <b>${newValue}</b>
-          </li>
-        `;
-      })
-      .join('');
-
-    return `
-      <p>${payload.message}</p>
-      <p>
-        <b>${payload.recordLabel}:</b>
-        ${payload.recordId}
-      </p>
-      <ul>${fieldsHtml}</ul>
-    `;
-  }
-
-  private formatValue(value: RowEditValue): string {
-    return value === null
-      ? 'Brak wartości'
-      : String(value);
+    return this.rowEditApiService.update(request);
   }
 }
-
-export type {
-  EditableRowChangeConfig,
-  EditableRowChangePayload,
-};
