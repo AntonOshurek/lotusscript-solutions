@@ -1,53 +1,392 @@
-// row-edit.models.ts
+8. shared/table/field/field.gcm.utils.ts
 
-import { z } from 'zod';
+import type { Field } from './field';
 
-type RowEditTarget =
-  | 'AMLDB_PC'
-  | 'AMLDB_ACC'
-  | 'AMLDB_CUST_GOLDEN'
-  | 'AMLDB_PS_GOLDEN';
-
-type RowEditValue = string | number | null;
-
-type RowEditValues = Record<string, RowEditValue>;
-
-interface RowEdit {
-  pkValue: string;
-  expectedVersion?: number;
-  newValues: RowEditValues;
+interface ChangedFieldPayload<
+  T extends Record<string, unknown>,
+> {
+  name: keyof T;
+  oldValue: unknown;
+  newValue: unknown;
+  isClear: boolean;
 }
 
-interface CreateRowEditRequest {
-  targetCode: RowEditTarget;
-  clientKey: string;
-  onBehalfOf?: string;
-  rows: RowEdit[];
+interface ChangeConfirmHtmlField {
+  label: string;
+  oldValue: unknown;
+  newValue: unknown;
+  isClear: boolean;
 }
 
-/*
- * Zod используется только для ответа сервера.
- */
-const createRowEditResponseSchema = z.object({
-  data: z.object({
-    requestId: z.string(),
-    workflowInstanceId: z.array(z.string()).optional(),
-  }),
-});
+interface CreateChangeConfirmHtmlPayload {
+  message: string;
+  recordLabel: string;
+  recordId: string;
+  fields: ChangeConfirmHtmlField[];
+}
 
-type CreateRowEditResponse = z.infer<
-  typeof createRowEditResponseSchema
->;
+const getChangedFields = <
+  T extends Record<string, unknown>,
+>(
+  original: T,
+  updated: T,
+  fields: Partial<Record<keyof T, Field>>,
+): ChangedFieldPayload<T>[] => {
+  return (Object.keys(fields) as Array<keyof T>)
+    .filter(field => fields[field]?.editable)
+    .filter(field => original[field] !== updated[field])
+    .map(field => {
+      const oldValue = original[field];
+      const newValue = updated[field];
 
-export type {
-  RowEditTarget,
-  RowEditValue,
-  RowEditValues,
-  RowEdit,
-  CreateRowEditRequest,
-  CreateRowEditResponse,
+      return {
+        name: field,
+        oldValue,
+        newValue,
+        isClear: isEmptyValue(newValue),
+      };
+    });
+};
+
+const isEmptyValue = (value: unknown): boolean => {
+  return (
+    value === null ||
+    value === undefined ||
+    value === ''
+  );
+};
+
+const createChangeConfirmHtml = (
+  payload: CreateChangeConfirmHtmlPayload,
+): string => {
+  const fieldsHtml = payload.fields
+    .map(field => {
+      const oldValue =
+        formatChangeConfirmValue(field.oldValue);
+
+      const newValue = field.isClear
+        ? 'Wartość zostanie usunięta'
+        : formatChangeConfirmValue(field.newValue);
+
+      return `
+        <li>
+          <b>${field.label}</b><br/>
+          Stara wartość: <b>${oldValue}</b><br/>
+          Nowa wartość: <b>${newValue}</b>
+        </li>
+      `;
+    })
+    .join('');
+
+  return `
+    <p>${payload.message}</p>
+    <p><b>${payload.recordLabel}:</b> ${payload.recordId}</p>
+    <ul>${fieldsHtml}</ul>
+  `;
+};
+
+const formatChangeConfirmValue = (
+  value: unknown,
+): string => {
+  if (isEmptyValue(value)) {
+    return 'Brak wartości';
+  }
+
+  return String(value);
 };
 
 export {
-  createRowEditResponseSchema,
+  createChangeConfirmHtml,
+  getChangedFields,
+  isEmptyValue,
 };
+
+export type {
+  ChangedFieldPayload,
+  ChangeConfirmHtmlField,
+  CreateChangeConfirmHtmlPayload,
+};
+
+
+
+
+9. shared/table/editable-row-change/editable-row-change.service.ts
+import { inject, Injectable } from '@angular/core';
+import type { Observable } from 'rxjs';
+
+// ERROR
+import { mapErrorToUiError } from '@shared/error';
+
+// FIELD
+import type { Field } from '../field/field';
+
+import {
+  createChangeConfirmHtml,
+  getChangedFields,
+  type ChangedFieldPayload,
+} from '../field/field.gcm.utils';
+
+// MODAL
+import {
+  MtModalService,
+} from '@citi-icg-172888/ng-icgds/modal';
+
+interface EditableRowChangePayload<
+  T extends Record<string, unknown>,
+> {
+  original: T;
+  updated: T;
+  onSuccess?: () => void;
+  onError?: () => void;
+  onCancel?: () => void;
+}
+
+interface EditableRowChangeConfig<
+  T extends Record<string, unknown>,
+  TResponse,
+> {
+  fieldsConfig: Partial<Record<keyof T, Field>>;
+
+  getRecordId: (row: T) => string;
+
+  confirmTitle: string;
+  confirmMessage: string;
+  recordLabel: string;
+
+  successTitle: string;
+  successHtml: string;
+
+  errorTitle: string;
+  errorMessage: string;
+
+  submit: (
+    updated: T,
+    changedFields: ChangedFieldPayload<T>[],
+  ) => Observable<TResponse>;
+}
+
+@Injectable({
+  providedIn: 'root',
+})
+export class EditableRowChangeService {
+  private readonly modalService =
+    inject(MtModalService);
+
+  public handle<
+    T extends Record<string, unknown>,
+    TResponse,
+  >(
+    payload: EditableRowChangePayload<T>,
+    config: EditableRowChangeConfig<T, TResponse>,
+  ): void {
+    const changedFields = getChangedFields(
+      payload.original,
+      payload.updated,
+      config.fieldsConfig,
+    );
+
+    if (changedFields.length === 0) {
+      return;
+    }
+
+    this.modalService.open({
+      status: 'warning',
+      title: config.confirmTitle,
+      html: createChangeConfirmHtml({
+        message: config.confirmMessage,
+        recordLabel: config.recordLabel,
+        recordId: config.getRecordId(payload.updated),
+        fields: changedFields.map(field => ({
+          label:
+            config.fieldsConfig[field.name]?.label ??
+            String(field.name),
+          oldValue: field.oldValue,
+          newValue: field.newValue,
+          isClear: field.isClear,
+        })),
+      }),
+      type: 'confirm',
+      afterUserAction: event => {
+        if (event.action === 'accept') {
+          this.submit(
+            payload,
+            config,
+            changedFields,
+          );
+
+          return;
+        }
+
+        payload.onCancel?.();
+      },
+    });
+  }
+
+  private submit<
+    T extends Record<string, unknown>,
+    TResponse,
+  >(
+    payload: EditableRowChangePayload<T>,
+    config: EditableRowChangeConfig<T, TResponse>,
+    changedFields: ChangedFieldPayload<T>[],
+  ): void {
+    config
+      .submit(payload.updated, changedFields)
+      .subscribe({
+        next: () => {
+          this.modalService.open({
+            status: 'success',
+            title: config.successTitle,
+            html: config.successHtml,
+            type: 'alert',
+          });
+
+          payload.onSuccess?.();
+        },
+
+        error: (error: unknown) => {
+          const uiError = mapErrorToUiError(
+            error,
+            config.errorMessage,
+          );
+
+          this.modalService.open({
+            status: 'danger',
+            title: config.errorTitle,
+            html: `
+              <p>${uiError.title}</p>
+              <p>${uiError.message}</p>
+            `,
+            type: 'alert',
+          });
+
+          payload.onError?.();
+        },
+      });
+  }
+}
+
+export type {
+  EditableRowChangeConfig,
+  EditableRowChangePayload,
+};
+
+
+
+
+
+
+
+11. update-transaction-pc.facade.ts
+import { inject, Injectable } from '@angular/core';
+
+// ENTITIES
+import {
+  TRANSACTION_PC_FIELDS,
+  type TransactionPc,
+  type TransactionPcFieldName,
+} from '@entities/transaction-pc';
+
+// FEATURES
+import {
+  UpdateTransactionPcFeature,
+  type UpdateTransactionPcNewValues,
+} from '@features/transaction-pc';
+
+// ROW EDIT
+import type { RowEditValue } from '@shared/row-edit';
+
+// TABLE
+import {
+  EditableRowChangeService,
+  type ChangedFieldPayload,
+  type EditableRowChangePayload,
+} from '@shared/table';
+
+@Injectable()
+export class UpdateTransactionPcFacade {
+  private readonly editableRowChangeService =
+    inject(EditableRowChangeService);
+
+  private readonly updateTransactionPcFeature =
+    inject(UpdateTransactionPcFeature);
+
+  public updateRow(
+    payload: EditableRowChangePayload<TransactionPc>,
+  ): void {
+    this.editableRowChangeService.handle(payload, {
+      fieldsConfig: TRANSACTION_PC_FIELDS,
+
+      getRecordId: row =>
+        String(row.transaction_id),
+
+      confirmTitle:
+        'Potwierdź zmianę transakcji PC',
+
+      confirmMessage:
+        'Czy na pewno chcesz zmienić wartości rekordu transakcji PC?',
+
+      recordLabel:
+        'ID transakcji PC',
+
+      successTitle:
+        'Zapisano zmianę',
+
+      successHtml:
+        '<p>Zmiany rekordu transakcji PC zostały zapisane.</p>',
+
+      errorTitle:
+        'Nieudana próba zmiany rekordu',
+
+      errorMessage:
+        'Nie udało się zapisać rekordu transakcji PC',
+
+      submit: (updated, changedFields) =>
+        this.updateTransactionPcFeature.update({
+          pkValue: String(updated.transaction_id),
+          newValues:
+            this.createNewValues(changedFields),
+        }),
+    });
+  }
+
+  private createNewValues(
+    changedFields:
+      ChangedFieldPayload<TransactionPc>[],
+  ): UpdateTransactionPcNewValues {
+    return changedFields.reduce<
+      UpdateTransactionPcNewValues
+    >((newValues, field) => {
+      const fieldName =
+        field.name as TransactionPcFieldName;
+
+      newValues[fieldName] =
+        this.toRowEditValue(
+          field.newValue,
+          field.isClear,
+        );
+
+      return newValues;
+    }, {});
+  }
+
+  private toRowEditValue(
+    value: unknown,
+    isClear: boolean,
+  ): RowEditValue {
+    if (isClear) {
+      return null;
+    }
+
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number'
+    ) {
+      return value;
+    }
+
+    throw new Error(
+      `Unsupported row edit value: ${String(value)}`,
+    );
+  }
+}
