@@ -1,96 +1,61 @@
-import { inject, Injectable } from '@angular/core';
-
-// ENTITIES
 import {
-  ACCOUNT_FIELDS,
-  type Account,
-} from '@entities/account';
-// FEATURES
+  IServerSideDatasource,
+  IServerSideGetRowsParams,
+} from 'ag-grid-enterprise';
+import { Observable } from 'rxjs';
+
+import { ApiFetchDataQueryParams } from '@shared/api';
 import {
-  UpdateAccountFeature,
-} from '@features/account';
-// TABLE
-import {
-  EditableRowChangeService,
-  type EditableRowChangePayload,
-} from '@shared/table';
+  mapFiltersToServerPagination,
+  mapGridPaginationToServerPagination,
+  mapSortOptionsToServerPagination,
+} from '@shared/ui/ag-grid/ag-grid-request.mapper';
 
-@Injectable()
-export class UpdateAccountFacade {
-  private readonly editableRowChangeService =
-    inject(EditableRowChangeService);
-
-  private readonly updateAccountFeature =
-    inject(UpdateAccountFeature);
-
-  public updateRow(
-    payload: EditableRowChangePayload<Account>,
-  ): void {
-    this.editableRowChangeService.handle(payload, {
-      fieldNames: ACCOUNT_FIELDS,
-
-      getRecordId: row => String(row.account_id),
-
-      confirmTitle: 'Potwierdź zmianę konta',
-      confirmMessage:
-        'Czy na pewno chcesz zmienić wartości rekordu konta?',
-      recordLabel: 'Id konta',
-
-      successTitle: 'Zapisano zmianę',
-      successHtml:
-        '<p>Zmiany rekordu konta zostały zapisane.</p>',
-
-      errorTitle: 'Nieudana próba zmiany rekordu',
-      errorMessage:
-        'Nie udało się zapisać rekordu konta',
-
-      submit: (updated, newValues) =>
-        this.updateAccountFeature.update({
-          pkValue: String(updated.account_id),
-          expectedVersion: updated.version,
-          newValues,
-        }),
-    });
-  }
-}
-
-
-
-
-import { inject, Injectable } from '@angular/core';
-
-// ROW EDIT
-import {
-  RowEditApiService,
-  type RowEditRequest,
-} from '@shared/row-edit';
-// MODEL
-import type {
-  UpdateAccountFeaturePayload,
-} from './model/update-account.feature.payload';
-
-@Injectable({
-  providedIn: 'root',
-})
-export class UpdateAccountFeature {
-  private readonly rowEditApiService =
-    inject(RowEditApiService);
-
-  public update(
-    payload: UpdateAccountFeaturePayload,
-  ) {
-    const request: RowEditRequest = {
-      targetCode: 'AMLDB_ACC',
-      clientKey: crypto.randomUUID(),
-      rows: [
-        {
-          pkValue: payload.pkValue,
-          expectedVersion: payload.expectedVersion,
-          newValues: payload.newValues,
-        },
-      ],
+export function createDatabaseSource<
+  T,
+  TResponse extends {
+    data: T[];
+    page: {
+      totalItems: number;
     };
+  },
+>(
+  fetchData: (
+    queryParams: ApiFetchDataQueryParams,
+  ) => Observable<TResponse>,
+  onError: (error: unknown) => void,
+): IServerSideDatasource<T> {
+  return {
+    getRows(params: IServerSideGetRowsParams<T>): void {
+      const { page, size } =
+        mapGridPaginationToServerPagination(params);
 
-    return this.rowEditApiService.update(request);
-  }
+      const sort =
+        mapSortOptionsToServerPagination(params);
+
+      const filter =
+        mapFiltersToServerPagination(
+          params.request.filterModel,
+        );
+
+      fetchData({
+        page,
+        size,
+        sort,
+        filter,
+      }).subscribe({
+        next: (response) => {
+          params.success({
+            rowData: response.data,
+            rowCount: response.page.totalItems,
+          });
+        },
+
+        error: (error: unknown) => {
+          onError(error);
+          params.fail();
+        },
+      });
+    },
+  };
 }
