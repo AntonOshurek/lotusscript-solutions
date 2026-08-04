@@ -1,16 +1,346 @@
-<p>Wystąpił błąd podczas zapisywania zmian.</p>
+# Przewodnik migracji Angular 19 → 21
 
-<p>Zmiany nie zostały zapisane. Spróbuj ponownie za chwilę.</p>
+## Informacje ogólne
 
-<p>Jeżeli problem będzie się powtarzał, skontaktuj się z administratorem systemu.</p>
+Dokument opisuje rzeczywisty proces migracji projektu z **Angular 19** do **Angular 21** z wykorzystaniem biblioteki **ICG DS**.
 
-<hr>
+Konfiguracja projektu:
 
-<p><strong>Informacje techniczne</strong></p>
-<ul>
-  <li>Kod błędu: <strong>ROW_EDIT_SUBMIT_FAILED</strong></li>
-  <li>Target: <code>${payload.targetMetadata.targetCode}</code></li>
-  <li>Kolumna klucza: <code>${payload.targetMetadata.keyColumn}</code></li>
-  <li>Kolumna wersji: <code>${payload.targetMetadata.versionColumn}</code></li>
-  <li>Szczegóły: <code>${uiError.title}</code></li>
-</ul>
+- Angular 19
+- Standalone API
+- Signals
+- ICG DS 6.x
+- AG Grid 35.x
+
+---
+
+# Problem
+
+Standardowa komenda:
+
+```bash
+ng update @angular/core@20 @angular/cli@20
+```
+
+kończyła się błędami związanymi z **peer dependencies**.
+
+Przyczyną nie był Angular, lecz biblioteka UI **ICG DS**.
+
+Macierz kompatybilności:
+
+| ICG DS | Angular |
+|---------|----------|
+| 6.x | 18.x – 19.x |
+| 7.x | >=21 |
+
+Nie istnieje wersja ICG DS zgodna z Angular 20.
+
+Oznacza to następującą ścieżkę migracji:
+
+```
+Angular 19
+↓
+Angular 20 (ICG DS niekompatybilny)
+↓
+Angular 21
+↓
+ICG DS 7
+```
+
+Z tego powodu konieczne było użycie opcji `--force` podczas przejścia na Angular 20.
+
+---
+
+# Krok 1. Aktualizacja Angular CLI
+
+Najpierw należy zaktualizować wyłącznie Angular CLI.
+
+```bash
+ng update @angular/cli@20
+```
+
+Po zakończeniu aktualizacji warto wykonać commit.
+
+---
+
+# Krok 2. Migracja Angular 19 → 20
+
+Framework oraz build system należy zaktualizować jednocześnie.
+
+```bash
+ng update @angular/core@20 @angular-devkit/build-angular@20 --force
+```
+
+Opcja `--force` jest wymagana, ponieważ ICG DS 6.x oficjalnie wspiera jedynie Angular 18 i 19.
+
+Po zakończeniu aktualizacji należy sprawdzić wersje:
+
+```bash
+ng version
+```
+
+Wszystkie pakiety Angular powinny mieć wersję 20.x.
+
+Jeżeli część pakietów pozostała na Angular 19 (np. `forms`, `router`, `platform-browser-dynamic`), należy zaktualizować je osobno:
+
+```bash
+ng update \
+@angular/forms@20 \
+@angular/router@20 \
+@angular/platform-browser-dynamic@20 \
+--force
+```
+
+Następnie ponownie sprawdzić:
+
+```bash
+ng version
+```
+
+---
+
+# Krok 3. Migracja Angular 20 → 21
+
+Po upewnieniu się, że cały framework działa na Angular 20:
+
+```bash
+ng update \
+@angular/core@21 \
+@angular/cli@21 \
+@angular-devkit/build-angular@21 \
+--force
+```
+
+Podczas migracji Angular zaproponuje opcjonalną migrację:
+
+```
+Migrate application projects to the new build system
+```
+
+Zaleca się zaakceptowanie tej migracji.
+
+---
+
+# Krok 4. Aktualizacja ICG DS
+
+Po przejściu na Angular 21 należy zaktualizować bibliotekę UI.
+
+```bash
+ng update @citi-icg-172888/ng-icgds@^7.0.0
+```
+
+Podczas pierwszej próby pojawił się błąd:
+
+```
+Cannot find module '@angular/cdk/schematics'
+```
+
+### Przyczyna
+
+Migracja ICG DS korzysta z **Angular CDK Schematics**.
+
+Przed ponownym uruchomieniem migracji należy zainstalować Angular CDK.
+
+```bash
+npm install @angular/cdk@21 --force
+```
+
+Następnie ponownie uruchomić migrację:
+
+```bash
+ng update @citi-icg-172888/ng-icgds@^7.0.0
+```
+
+Po pomyślnym zakończeniu wykonać:
+
+```bash
+npm install
+```
+
+---
+
+# Końcowe wersje
+
+```
+Angular 21
+
+Angular CLI 21
+
+ICG DS 7
+
+Angular CDK 21
+
+AG Grid 35
+```
+
+---
+
+# Problemy napotkane podczas migracji
+
+## 1. Angular 20 nie jest wspierany przez ICG DS
+
+ICG DS 6.x wspiera wyłącznie Angular 18 i 19, natomiast ICG DS 7 wymaga Angular 21.
+
+Z tego powodu przejście przez Angular 20 wymaga użycia `--force`.
+
+---
+
+## 2. Angular CDK
+
+Migracja ICG DS wymaga modułu:
+
+```
+@angular/cdk/schematics
+```
+
+Dlatego przed migracją należy zainstalować Angular CDK.
+
+---
+
+## 3. Repository is not clean
+
+Każda komenda `ng update` wymaga czystego repozytorium Git.
+
+Po zakończeniu każdego etapu migracji zaleca się wykonanie commit.
+
+---
+
+## 4. npm install
+
+Po zakończeniu migracji ICG DS należy obowiązkowo wykonać:
+
+```bash
+npm install
+```
+
+Dopiero po tej operacji wszystkie zależności zostaną poprawnie zainstalowane.
+
+---
+
+# Weryfikacja po migracji
+
+Sprawdzenie wersji:
+
+```bash
+ng version
+```
+
+Sprawdzenie zależności:
+
+```bash
+npm ls
+```
+
+Uruchomienie aplikacji:
+
+```bash
+npm start
+```
+
+Sprawdzenie procesu budowania:
+
+```bash
+ng build
+```
+
+---
+
+# Zone.js
+
+Po zakończeniu migracji podjęto próbę przejścia na **zoneless**.
+
+Usunięto:
+
+```json
+"polyfills": [
+  "zone.js"
+]
+```
+
+oraz
+
+```ts
+provideZoneChangeDetection()
+```
+
+Aplikacja uruchamiała się poprawnie, jednak komponenty biblioteki **ICG DS** przestały działać prawidłowo.
+
+Zaobserwowane zachowanie:
+
+- Menu/Dropdown otwierało się poprawnie.
+- Overlay pojawiał się w lewym górnym rogu ekranu.
+- Pozycjonowanie względem elementu wywołującego nie działało.
+
+Po przywróceniu:
+
+```ts
+provideZoneChangeDetection()
+```
+
+oraz
+
+```json
+"zone.js"
+```
+
+problem całkowicie zniknął.
+
+### Wniosek
+
+Na moment wykonywania migracji ICG DS 7 nadal wymaga działania z **Zone.js**.
+
+Dlatego zaleca się pozostawienie:
+
+- `zone.js`
+- `provideZoneChangeDetection()`
+
+do momentu oficjalnego wsparcia trybu zoneless przez bibliotekę.
+
+---
+
+# Kolejność migracji
+
+```text
+Angular 19
+        │
+        ▼
+ng update @angular/cli@20
+        │
+        ▼
+ng update @angular/core@20 @angular-devkit/build-angular@20 --force
+        │
+        ▼
+W razie potrzeby zaktualizować pozostałe pakiety Angular
+(forms/router/platform-browser-dynamic)
+        │
+        ▼
+Angular 20
+        │
+        ▼
+ng update @angular/core@21 @angular/cli@21 @angular-devkit/build-angular@21 --force
+        │
+        ▼
+npm install @angular/cdk@21 --force
+        │
+        ▼
+ng update @citi-icg-172888/ng-icgds@^7.0.0
+        │
+        ▼
+npm install
+        │
+        ▼
+Angular 21 + ICG DS 7
+```
+
+---
+
+# Rezultat
+
+Po wykonaniu wszystkich kroków:
+
+- aplikacja uruchamia się poprawnie,
+- projekt buduje się bez błędów,
+- działa na Angular 21,
+- korzysta z ICG DS 7,
+- korzysta z AG Grid 35,
+- pozostaje kompatybilny z Zone.js.
