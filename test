@@ -1,33 +1,16 @@
-<p>Nie udało się zweryfikować konfiguracji edycji tego rekordu.</p>
+<p>Wystąpił błąd podczas zapisywania zmian.</p>
 
-<p>Konfiguracja otrzymana z serwera jest niezgodna z danymi wyświetlanymi w tabeli, dlatego zapis został przerwany.</p>
+<p>Zmiany nie zostały zapisane. Spróbuj ponownie za chwilę.</p>
 
-<p>Odśwież stronę i spróbuj ponownie. Jeżeli problem będzie się powtarzał, skontaktuj się z administratorem systemu.</p>
-
-<hr>
-
-<p><strong>Informacje techniczne</strong></p>
-<ul>
-  <li>Kod błędu: <strong>ROW_EDIT_METADATA_COLUMNS_NOT_FOUND</strong></li>
-  <li>Kolumna klucza: <code>${keyColumn}</code></li>
-  <li>Kolumna wersji: <code>${versionColumn}</code></li>
-</ul>
-
-
-
-
-<p>Nie udało się przygotować danych do zapisania.</p>
-
-<p>Otrzymano nieprawidłowe dane wymagane do identyfikacji rekordu lub jego wersji, dlatego zapis nie może zostać wykonany.</p>
-
-<p>Odśwież stronę i spróbuj ponownie. Jeżeli problem będzie się powtarzał, skontaktuj się z administratorem systemu.</p>
+<p>Jeżeli problem będzie się powtarzał, skontaktuj się z administratorem systemu.</p>
 
 <hr>
 
 <p><strong>Informacje techniczne</strong></p>
 <ul>
-  <li>Kod błędu: <strong>ROW_EDIT_METADATA_INVALID_VALUES</strong></li>
-  <li>Kolumna klucza: <code>${keyColumn}</code></li>
-  <li>Kolumna wersji: <code>${versionColumn}</code></li>
-  <li>Wymagany typ: <code>number</code></li>
+  <li>Kod błędu: <strong>ROW_EDIT_SUBMIT_FAILED</strong></li>
+  <li>Target: <code>${payload.targetMetadata.targetCode}</code></li>
+  <li>Kolumna klucza: <code>${payload.targetMetadata.keyColumn}</code></li>
+  <li>Kolumna wersji: <code>${payload.targetMetadata.versionColumn}</code></li>
+  <li>Szczegóły: <code>${uiError.title}</code></li>
 </ul>
