@@ -1,84 +1,3 @@
-// attribute-change-context.ts
-
-import type {
-  AttributeCellChangeEvent,
-  AttributeParentRow,
-  AttributeRow,
-} from '@entities/attribute';
-
-type AttributeChangeType = 'set' | 'clear';
-
-interface AttributeChangeContext {
-  parent: AttributeParentRow;
-  attribute: AttributeRow;
-  type: AttributeChangeType;
-  newValue: string;
-}
-
-const getAttributeParent = (
-  event: AttributeCellChangeEvent,
-): AttributeParentRow | null => {
-  const parent = event.node.parent?.data;
-
-  return parent?.type === 'AttributeParent'
-    ? parent
-    : null;
-};
-
-const getAttribute = (
-  event: AttributeCellChangeEvent,
-): AttributeRow | null => {
-  const attribute = event.node.data;
-
-  return attribute?.type === 'Atrybut'
-    ? attribute
-    : null;
-};
-
-const getAttributeChangeType = (
-  newValue: unknown,
-): AttributeChangeType =>
-  String(newValue ?? '').length === 0
-    ? 'clear'
-    : 'set';
-
-const getAttributeChangeContext = (
-  event: AttributeCellChangeEvent,
-): AttributeChangeContext | null => {
-  const parent = getAttributeParent(event);
-  const attribute = getAttribute(event);
-
-  if (!parent || !attribute) {
-    return null;
-  }
-
-  const newValue = String(event.newValue ?? '');
-
-  return {
-    parent,
-    attribute,
-    type: getAttributeChangeType(newValue),
-    newValue,
-  };
-};
-
-export {
-  getAttributeChangeContext,
-};
-
-export type {
-  AttributeChangeContext,
-  AttributeChangeType,
-};
-
-
-
-
-
-
-
-// attribute-change-dialog.service.ts
-
 import { inject, Injectable } from '@angular/core';
 
 // ENTITIES
@@ -90,14 +9,23 @@ import type {
 // ICG
 import { MtModalService } from '@citi-icg-172888/ng-icgds/modal';
 
-interface AttributeChangeConfirmationParams {
-  parent: AttributeParentRow;
+interface AttributeDialogParams {
+  attributeParent: AttributeParentRow;
   attribute: AttributeRow;
+}
+
+interface SetAttributeConfirmationParams extends AttributeDialogParams {
   newValue: string;
   onAccept: () => void;
 }
 
-@Injectable()
+interface ClearAttributeConfirmationParams extends AttributeDialogParams {
+  onAccept: () => void;
+}
+
+@Injectable({
+  providedIn: 'root',
+})
 export class AttributeChangeDialogService {
   private readonly modalService = inject(MtModalService);
 
@@ -106,28 +34,27 @@ export class AttributeChangeDialogService {
       status: 'danger',
       title: 'Nie można wykonać operacji',
       html:
-        '<p>Nie udało się zidentyfikować danych edytowanego atrybutu.<br/>' +
-        'Upewnij się, że edytujesz wartość atrybutu w prawidłowym wierszu.</p>' +
+        '<p>Nie udało się zidentyfikować danych edytowanego atrybutu.</p>' +
+        '<p>Upewnij się, że edytujesz wartość w kolumnie <b>Wartość atrybutu</b>.</p>' +
         '<p>Odśwież stronę i spróbuj ponownie. Jeśli problem będzie się powtarzał, skontaktuj się z administratorem systemu.</p>',
       type: 'alert',
     });
   }
 
   openClearConfirmation({
-    parent,
+    attributeParent,
     attribute,
     onAccept,
-  }: Omit<AttributeChangeConfirmationParams, 'newValue'>): void {
+  }: ClearAttributeConfirmationParams): void {
     this.modalService.open({
       status: 'warning',
       title: 'Potwierdź usunięcie wartości atrybutu',
       html:
         `Czy na pewno chcesz usunąć wartość atrybutu ` +
         `<b>${attribute.attributeName}</b>?<br/><br/>` +
-        `Element: <b>${parent.parentName}</b><br/>` +
+        `Element: <b>${attributeParent.parentName}</b><br/>` +
         `Obecna wartość: <b>${attribute.value}</b>`,
       type: 'confirm',
-
       afterUserAction: (event) => {
         if (event.action === 'accept') {
           onAccept();
@@ -137,22 +64,21 @@ export class AttributeChangeDialogService {
   }
 
   openSetConfirmation({
-    parent,
+    attributeParent,
     attribute,
     newValue,
     onAccept,
-  }: AttributeChangeConfirmationParams): void {
+  }: SetAttributeConfirmationParams): void {
     this.modalService.open({
       status: 'warning',
       title: 'Potwierdź zmianę wartości atrybutu',
       html:
         `Czy na pewno chcesz zmienić wartość atrybutu ` +
         `<b>${attribute.attributeName}</b>?<br/><br/>` +
-        `Element: <b>${parent.parentName}</b><br/>` +
+        `Element: <b>${attributeParent.parentName}</b><br/>` +
         `Obecna wartość: <b>${attribute.value}</b><br/>` +
         `Nowa wartość: <b>${newValue}</b>`,
       type: 'confirm',
-
       afterUserAction: (event) => {
         if (event.action === 'accept') {
           onAccept();
@@ -189,7 +115,7 @@ export class AttributeChangeDialogService {
     });
   }
 
-  openChangeError(
+  openSetError(
     attributeName: string,
     parentName: string,
   ): void {
@@ -197,8 +123,22 @@ export class AttributeChangeDialogService {
       status: 'danger',
       title: 'Błąd wysyłki zmiany do akceptacji',
       html:
-        `Nie udało się zmodyfikować atrybutu ` +
-        `<b>${attributeName}</b> dla <b>${parentName}</b>.`,
+        `Wartość atrybutu <b>${attributeName}</b> ` +
+        `dla <b>${parentName}</b> nie została wysłana do aktualizacji.`,
+      type: 'alert',
+    });
+  }
+
+  openClearError(
+    attributeName: string,
+    parentName: string,
+  ): void {
+    this.modalService.open({
+      status: 'danger',
+      title: 'Błąd usuwania wartości atrybutu',
+      html:
+        `Nie udało się usunąć wartości atrybutu <b>${attributeName}</b> ` +
+        `dla <b>${parentName}</b>.`,
       type: 'alert',
     });
   }
@@ -206,46 +146,128 @@ export class AttributeChangeDialogService {
 
 
 
-change(event: AttributeCellChangeEvent): void {
-  const context = getAttributeChangeContext(event);
 
-  if (!context) {
-    this.attributeChangeDialogService.openInvalidContext();
-    return;
-  }
 
-  const {
-    parent,
-    attribute,
-    type,
-    newValue,
-  } = context;
 
-  const payload = {
-    entityId: parent.id,
-    attributeName: attribute.attributeName,
-    value: newValue,
-    clientKey: crypto.randomUUID(),
-  };
+import { inject, Injectable } from '@angular/core';
 
-  if (type === 'clear') {
-    this.attributeChangeDialogService.openClearConfirmation({
-      parent,
+// ENTITIES
+import {
+  AttributeCommandsApi,
+} from '@entities/attribute';
+
+import type {
+  AttributeCellChangeEvent,
+  ClearAttributePayload,
+  SetAttributePayload,
+} from '@entities/attribute';
+
+// MODEL
+import { getAttributeChangeContext } from './model/attribute-change-context';
+import { AttributeChangeDialogService } from './model/attribute-change-dialog.service';
+
+@Injectable()
+export class ChangeAttributeFeature {
+  private readonly attributeCommandsApi = inject(AttributeCommandsApi);
+
+  private readonly attributeChangeDialogService =
+    inject(AttributeChangeDialogService);
+
+  change(event: AttributeCellChangeEvent): void {
+    const context = getAttributeChangeContext(event);
+
+    if (!context) {
+      this.attributeChangeDialogService.openInvalidContext();
+      return;
+    }
+
+    const {
+      attributeParent,
       attribute,
-      onAccept: () => {
-        this.runClearAttribute(payload, parent.parentName);
-      },
-    });
+      type,
+      newValue,
+    } = context;
 
-    return;
+    if (type === 'clear') {
+      const payload: ClearAttributePayload = {
+        entityId: attributeParent.id,
+        attributeName: attribute.attributeName,
+        clientKey: crypto.randomUUID(),
+      };
+
+      this.attributeChangeDialogService.openClearConfirmation({
+        attributeParent,
+        attribute,
+        onAccept: () =>
+          this.clearAttribute(
+            payload,
+            attributeParent.parentName,
+          ),
+      });
+
+      return;
+    }
+
+    const payload: SetAttributePayload = {
+      entityId: attributeParent.id,
+      attributeName: attribute.attributeName,
+      value: newValue,
+      clientKey: crypto.randomUUID(),
+    };
+
+    this.attributeChangeDialogService.openSetConfirmation({
+      attributeParent,
+      attribute,
+      newValue,
+      onAccept: () =>
+        this.setAttribute(
+          payload,
+          attributeParent.parentName,
+        ),
+    });
   }
 
-  this.attributeChangeDialogService.openSetConfirmation({
-    parent,
-    attribute,
-    newValue,
-    onAccept: () => {
-      this.runSetAttribute(payload, parent.parentName);
-    },
-  });
+  private setAttribute(
+    payload: SetAttributePayload,
+    parentName: string,
+  ): void {
+    this.attributeCommandsApi
+      .setAttribute(payload)
+      .subscribe({
+        next: () => {
+          this.attributeChangeDialogService.openSetSuccess(
+            payload.attributeName,
+            parentName,
+          );
+        },
+        error: () => {
+          this.attributeChangeDialogService.openSetError(
+            payload.attributeName,
+            parentName,
+          );
+        },
+      });
+  }
+
+  private clearAttribute(
+    payload: ClearAttributePayload,
+    parentName: string,
+  ): void {
+    this.attributeCommandsApi
+      .clearAttribute(payload)
+      .subscribe({
+        next: () => {
+          this.attributeChangeDialogService.openClearSuccess(
+            payload.attributeName,
+            parentName,
+          );
+        },
+        error: () => {
+          this.attributeChangeDialogService.openClearError(
+            payload.attributeName,
+            parentName,
+          );
+        },
+      });
+  }
 }
