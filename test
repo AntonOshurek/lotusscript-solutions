@@ -2,58 +2,56 @@ import { inject, Injectable } from '@angular/core';
 
 // ENTITIES
 import type {
-  AttributeParentRow,
-  AttributeRow,
-} from '@entities/attribute';
+  GovernanceDecisionKind,
+  GovernanceResponseDto,
+} from '@entities/governance';
+import {
+  GOVERNANCE_OUTCOME_LABEL,
+  GOVERNANCE_PHASE_LABEL,
+} from '@entities/governance';
+
+// MODEL
+import {
+  CONFIRM_MAKE_DECISION_NOTIFICATION,
+  ERROR_MAKE_DECISION_NOTIFICATION,
+  SUCCESS_MAKE_DECISION_NOTIFICATION,
+} from './make-decision-notifications.model';
+
+// ERROR
+import type { UiError } from '@shared/error';
 
 // ICG
 import { MtModalService } from '@citi-icg-172888/ng-icgds/modal';
 
-interface AttributeDialogParams {
-  attributeParent: AttributeParentRow;
-  attribute: AttributeRow;
-}
-
-interface SetAttributeConfirmationParams extends AttributeDialogParams {
-  newValue: string;
-  onAccept: () => void;
-}
-
-interface ClearAttributeConfirmationParams extends AttributeDialogParams {
-  onAccept: () => void;
-}
-
-@Injectable({
-  providedIn: 'root',
-})
-export class AttributeChangeDialogService {
+@Injectable()
+export class MakeDecisionDialogService {
   private readonly modalService = inject(MtModalService);
 
-  openInvalidContext(): void {
+  openInvalidPayload(
+    decisionKind: GovernanceDecisionKind,
+  ): void {
+    const notification =
+      ERROR_MAKE_DECISION_NOTIFICATION.DECISION_PAYLOAD_INVALID_VALUES;
+
     this.modalService.open({
       status: 'danger',
-      title: 'Nie można wykonać operacji',
-      html:
-        '<p>Nie udało się zidentyfikować danych edytowanego atrybutu.</p>' +
-        '<p>Upewnij się, że edytujesz wartość w kolumnie <b>Wartość atrybutu</b>.</p>' +
-        '<p>Odśwież stronę i spróbuj ponownie. Jeśli problem będzie się powtarzał, skontaktuj się z administratorem systemu.</p>',
+      title: notification.title,
+      html: notification.html(decisionKind),
       type: 'alert',
     });
   }
 
-  openClearConfirmation({
-    attributeParent,
-    attribute,
-    onAccept,
-  }: ClearAttributeConfirmationParams): void {
+  openConfirmation(
+    decisionKind: GovernanceDecisionKind,
+    onAccept: () => void,
+  ): void {
+    const notification =
+      CONFIRM_MAKE_DECISION_NOTIFICATION[decisionKind];
+
     this.modalService.open({
       status: 'warning',
-      title: 'Potwierdź usunięcie wartości atrybutu',
-      html:
-        `Czy na pewno chcesz usunąć wartość atrybutu ` +
-        `<b>${attribute.attributeName}</b>?<br/><br/>` +
-        `Element: <b>${attributeParent.parentName}</b><br/>` +
-        `Obecna wartość: <b>${attribute.value}</b>`,
+      title: notification.title,
+      html: notification.html,
       type: 'confirm',
       afterUserAction: (event) => {
         if (event.action === 'accept') {
@@ -63,88 +61,83 @@ export class AttributeChangeDialogService {
     });
   }
 
-  openSetConfirmation({
-    attributeParent,
-    attribute,
-    newValue,
-    onAccept,
-  }: SetAttributeConfirmationParams): void {
+  openSuccess(
+    decisionKind: GovernanceDecisionKind,
+    data: GovernanceResponseDto,
+  ): void {
+    const notification =
+      SUCCESS_MAKE_DECISION_NOTIFICATION[decisionKind];
+
+    this.modalService.open({
+      status: 'success',
+      title: notification.title,
+      html: this.getDecisionResultHtml(data),
+      type: 'alert',
+    });
+  }
+
+  openUnsuccessfulResult(
+    data: GovernanceResponseDto,
+  ): void {
     this.modalService.open({
       status: 'warning',
-      title: 'Potwierdź zmianę wartości atrybutu',
-      html:
-        `Czy na pewno chcesz zmienić wartość atrybutu ` +
-        `<b>${attribute.attributeName}</b>?<br/><br/>` +
-        `Element: <b>${attributeParent.parentName}</b><br/>` +
-        `Obecna wartość: <b>${attribute.value}</b><br/>` +
-        `Nowa wartość: <b>${newValue}</b>`,
-      type: 'confirm',
-      afterUserAction: (event) => {
-        if (event.action === 'accept') {
-          onAccept();
-        }
-      },
-    });
-  }
-
-  openSetSuccess(
-    attributeName: string,
-    parentName: string,
-  ): void {
-    this.modalService.open({
-      status: 'success',
-      title: 'Wysłano zmianę',
-      html:
-        `Wartość atrybutu <b>${attributeName}</b> ` +
-        `dla <b>${parentName}</b> została pomyślnie wysłana do akceptacji.`,
+      title: 'Operacja nie została zakończona pomyślnie.',
+      html: this.getDecisionResultHtml(data),
       type: 'alert',
     });
   }
 
-  openClearSuccess(
-    attributeName: string,
-    parentName: string,
+  openConflictError(
+    uiError: UiError,
+    decisionKind: GovernanceDecisionKind,
   ): void {
-    this.modalService.open({
-      status: 'success',
-      title: 'Usunięto wartość',
-      html:
-        `Wartość atrybutu <b>${attributeName}</b> ` +
-        `dla <b>${parentName}</b> została pomyślnie usunięta.`,
-      type: 'alert',
-    });
-  }
+    const notification =
+      ERROR_MAKE_DECISION_NOTIFICATION.DECISION_SUBMIT_FAILED_BY_CONFLICT;
 
-  openSetError(
-    attributeName: string,
-    parentName: string,
-  ): void {
     this.modalService.open({
       status: 'danger',
-      title: 'Błąd wysyłki zmiany do akceptacji',
-      html:
-        `Wartość atrybutu <b>${attributeName}</b> ` +
-        `dla <b>${parentName}</b> nie została wysłana do aktualizacji.`,
+      title: notification.title,
+      html: notification.html({
+        uiError,
+        decisionKind,
+      }),
       type: 'alert',
     });
   }
 
-  openClearError(
-    attributeName: string,
-    parentName: string,
+  openSubmitError(
+    uiError: UiError,
+    decisionKind: GovernanceDecisionKind,
   ): void {
+    const notification =
+      ERROR_MAKE_DECISION_NOTIFICATION.DECISION_SUBMIT_FAILED;
+
     this.modalService.open({
       status: 'danger',
-      title: 'Błąd usuwania wartości atrybutu',
-      html:
-        `Nie udało się usunąć wartości atrybutu <b>${attributeName}</b> ` +
-        `dla <b>${parentName}</b>.`,
+      title: notification.title,
+      html: notification.html({
+        uiError,
+        decisionKind,
+      }),
       type: 'alert',
     });
+  }
+
+  private getDecisionResultHtml(
+    data: GovernanceResponseDto,
+  ): string {
+    return `
+      <div>
+        <p>Wynik: ${
+          GOVERNANCE_OUTCOME_LABEL[data.outcome] ?? data.outcome
+        }</p>
+        <p>Etap: ${
+          GOVERNANCE_PHASE_LABEL[data.phase] ?? data.phase
+        }</p>
+      </div>
+    `;
   }
 }
-
-
 
 
 
@@ -153,121 +146,109 @@ import { inject, Injectable } from '@angular/core';
 
 // ENTITIES
 import {
-  AttributeCommandsApi,
-} from '@entities/attribute';
+  GovernanceCommandsApi,
+} from '@entities/governance';
 
 import type {
-  AttributeCellChangeEvent,
-  ClearAttributePayload,
-  SetAttributePayload,
-} from '@entities/attribute';
+  GovernanceDecisionKind,
+  GovernanceDecisionRequestDto,
+  GovernanceResponseDto,
+} from '@entities/governance';
 
 // MODEL
-import { getAttributeChangeContext } from './model/attribute-change-context';
-import { AttributeChangeDialogService } from './model/attribute-change-dialog.service';
+import type {
+  MakeDecisionFeaturePayload,
+  PrecomputedMakeDecisionPayload,
+} from './model/make-decision.model';
 
-@Injectable()
-export class ChangeAttributeFeature {
-  private readonly attributeCommandsApi = inject(AttributeCommandsApi);
+import { MakeDecisionDialogService } from './model/make-decision-dialog.service';
 
-  private readonly attributeChangeDialogService =
-    inject(AttributeChangeDialogService);
+// ERROR
+import { mapErrorToUiError } from '@shared/error';
 
-  change(event: AttributeCellChangeEvent): void {
-    const context = getAttributeChangeContext(event);
+@Injectable({
+  providedIn: 'root',
+})
+export class MakeDecisionFeature {
+  private readonly governanceCommandsApi =
+    inject(GovernanceCommandsApi);
 
-    if (!context) {
-      this.attributeChangeDialogService.openInvalidContext();
+  private readonly dialogService =
+    inject(MakeDecisionDialogService);
+
+  public decide(
+    details: PrecomputedMakeDecisionPayload,
+    decisionKind: GovernanceDecisionKind,
+  ): void {
+    if (!details) {
+      this.dialogService.openInvalidPayload(decisionKind);
       return;
     }
 
-    const {
-      attributeParent,
-      attribute,
-      type,
-      newValue,
-    } = context;
+    this.dialogService.openConfirmation(
+      decisionKind,
+      () => {
+        this.runDecision(
+          {
+            ...details,
+            kind: decisionKind,
+          },
+          decisionKind,
+        );
+      },
+    );
+  }
 
-    if (type === 'clear') {
-      const payload: ClearAttributePayload = {
-        entityId: attributeParent.id,
-        attributeName: attribute.attributeName,
-        clientKey: crypto.randomUUID(),
-      };
+  private runDecision(
+    payload: MakeDecisionFeaturePayload,
+    decisionKind: GovernanceDecisionKind,
+  ): void {
+    this.sendDecision(payload).subscribe({
+      next: ({ data }: { data: GovernanceResponseDto }) => {
+        if (data.outcome === 'SUCCEEDED') {
+          this.dialogService.openSuccess(
+            decisionKind,
+            data,
+          );
 
-      this.attributeChangeDialogService.openClearConfirmation({
-        attributeParent,
-        attribute,
-        onAccept: () =>
-          this.clearAttribute(
-            payload,
-            attributeParent.parentName,
-          ),
-      });
+          return;
+        }
 
-      return;
-    }
+        this.dialogService.openUnsuccessfulResult(data);
+      },
 
-    const payload: SetAttributePayload = {
-      entityId: attributeParent.id,
-      attributeName: attribute.attributeName,
-      value: newValue,
-      clientKey: crypto.randomUUID(),
-    };
+      error: (error: unknown) => {
+        const uiError = mapErrorToUiError(error);
 
-    this.attributeChangeDialogService.openSetConfirmation({
-      attributeParent,
-      attribute,
-      newValue,
-      onAccept: () =>
-        this.setAttribute(
-          payload,
-          attributeParent.parentName,
-        ),
+        if (uiError.errorCode === 409) {
+          this.dialogService.openConflictError(
+            uiError,
+            decisionKind,
+          );
+
+          return;
+        }
+
+        this.dialogService.openSubmitError(
+          uiError,
+          decisionKind,
+        );
+      },
     });
   }
 
-  private setAttribute(
-    payload: SetAttributePayload,
-    parentName: string,
-  ): void {
-    this.attributeCommandsApi
-      .setAttribute(payload)
-      .subscribe({
-        next: () => {
-          this.attributeChangeDialogService.openSetSuccess(
-            payload.attributeName,
-            parentName,
-          );
-        },
-        error: () => {
-          this.attributeChangeDialogService.openSetError(
-            payload.attributeName,
-            parentName,
-          );
-        },
-      });
-  }
+  private sendDecision(
+    payload: MakeDecisionFeaturePayload,
+  ) {
+    const requestBody: GovernanceDecisionRequestDto = {
+      kind: payload.kind,
+      expectedCaseVersion: payload.expectedCaseVersion,
+      reason: payload.reason,
+    };
 
-  private clearAttribute(
-    payload: ClearAttributePayload,
-    parentName: string,
-  ): void {
-    this.attributeCommandsApi
-      .clearAttribute(payload)
-      .subscribe({
-        next: () => {
-          this.attributeChangeDialogService.openClearSuccess(
-            payload.attributeName,
-            parentName,
-          );
-        },
-        error: () => {
-          this.attributeChangeDialogService.openClearError(
-            payload.attributeName,
-            parentName,
-          );
-        },
-      });
+    return this.governanceCommandsApi.caseDecision(
+      requestBody,
+      payload.caseId,
+    );
   }
 }
