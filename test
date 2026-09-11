@@ -1,21 +1,14 @@
 import { inject, Injectable } from '@angular/core';
 
 // ENTITIES
-import type {
-  GovernanceDecisionKind,
-  GovernanceResponseDto,
-} from '@entities/governance';
 import {
   GOVERNANCE_OUTCOME_LABEL,
   GOVERNANCE_PHASE_LABEL,
 } from '@entities/governance';
+import type { GovernanceResponseDto } from '@entities/governance';
 
 // MODEL
-import {
-  CONFIRM_MAKE_DECISION_NOTIFICATION,
-  ERROR_MAKE_DECISION_NOTIFICATION,
-  SUCCESS_MAKE_DECISION_NOTIFICATION,
-} from './make-decision-notifications.model';
+import { ERROR_CANCEL_CASE_NOTIFICATIONS } from './cancel-case-notifications.model';
 
 // ERROR
 import type { UiError } from '@shared/error';
@@ -24,34 +17,26 @@ import type { UiError } from '@shared/error';
 import { MtModalService } from '@citi-icg-172888/ng-icgds/modal';
 
 @Injectable()
-export class MakeDecisionDialogService {
+export class CancelCaseDialogService {
   private readonly modalService = inject(MtModalService);
 
-  openInvalidPayload(
-    decisionKind: GovernanceDecisionKind,
-  ): void {
+  openInvalidPayload(): void {
     const notification =
-      ERROR_MAKE_DECISION_NOTIFICATION.DECISION_PAYLOAD_INVALID_VALUES;
+      ERROR_CANCEL_CASE_NOTIFICATIONS.CANCEL_CASE_PAYLOAD_UNDEFINED;
 
     this.modalService.open({
       status: 'danger',
       title: notification.title,
-      html: notification.html(decisionKind),
+      html: notification.html(),
       type: 'alert',
     });
   }
 
-  openConfirmation(
-    decisionKind: GovernanceDecisionKind,
-    onAccept: () => void,
-  ): void {
-    const notification =
-      CONFIRM_MAKE_DECISION_NOTIFICATION[decisionKind];
-
+  openConfirmation(onAccept: () => void): void {
     this.modalService.open({
       status: 'warning',
-      title: notification.title,
-      html: notification.html,
+      title: 'Potwierdź anulowanie',
+      html: 'Czy na pewno chcesz anulować ten wniosek o zmianę?',
       type: 'confirm',
       afterUserAction: (event) => {
         if (event.action === 'accept') {
@@ -61,71 +46,53 @@ export class MakeDecisionDialogService {
     });
   }
 
-  openSuccess(
-    decisionKind: GovernanceDecisionKind,
-    data: GovernanceResponseDto,
-  ): void {
-    const notification =
-      SUCCESS_MAKE_DECISION_NOTIFICATION[decisionKind];
-
+  openSuccess(data: GovernanceResponseDto): void {
     this.modalService.open({
       status: 'success',
-      title: notification.title,
-      html: this.getDecisionResultHtml(data),
+      title: 'Operacja zakończona pomyślnie.',
+      html: this.getResultHtml(data),
       type: 'alert',
     });
   }
 
-  openUnsuccessfulResult(
-    data: GovernanceResponseDto,
-  ): void {
+  openUnsuccessfulResult(data: GovernanceResponseDto): void {
     this.modalService.open({
       status: 'warning',
       title: 'Operacja nie została zakończona pomyślnie.',
-      html: this.getDecisionResultHtml(data),
+      html: this.getResultHtml(data),
       type: 'alert',
     });
   }
 
-  openConflictError(
-    uiError: UiError,
-    decisionKind: GovernanceDecisionKind,
-  ): void {
+  openConflictError(uiError: UiError): void {
     const notification =
-      ERROR_MAKE_DECISION_NOTIFICATION.DECISION_SUBMIT_FAILED_BY_CONFLICT;
+      ERROR_CANCEL_CASE_NOTIFICATIONS.CANCEL_CASE_SUBMIT_FAILED_BY_CONFLICT;
 
     this.modalService.open({
       status: 'danger',
       title: notification.title,
       html: notification.html({
         uiError,
-        decisionKind,
       }),
       type: 'alert',
     });
   }
 
-  openSubmitError(
-    uiError: UiError,
-    decisionKind: GovernanceDecisionKind,
-  ): void {
+  openSubmitError(uiError: UiError): void {
     const notification =
-      ERROR_MAKE_DECISION_NOTIFICATION.DECISION_SUBMIT_FAILED;
+      ERROR_CANCEL_CASE_NOTIFICATIONS.CANCEL_CASE_SUBMIT_FAILED;
 
     this.modalService.open({
       status: 'danger',
       title: notification.title,
       html: notification.html({
         uiError,
-        decisionKind,
       }),
       type: 'alert',
     });
   }
 
-  private getDecisionResultHtml(
-    data: GovernanceResponseDto,
-  ): string {
+  private getResultHtml(data: GovernanceResponseDto): string {
     return `
       <div>
         <p>Wynik: ${
@@ -148,20 +115,14 @@ import { inject, Injectable } from '@angular/core';
 import {
   GovernanceCommandsApi,
 } from '@entities/governance';
-
 import type {
-  GovernanceDecisionKind,
-  GovernanceDecisionRequestDto,
+  GovernanceCaseCancelRequestDto,
   GovernanceResponseDto,
 } from '@entities/governance';
 
 // MODEL
-import type {
-  MakeDecisionFeaturePayload,
-  PrecomputedMakeDecisionPayload,
-} from './model/make-decision.model';
-
-import { MakeDecisionDialogService } from './model/make-decision-dialog.service';
+import type { CancelCaseFeaturePayload } from './model/cancel-case.model';
+import { CancelCaseDialogService } from './model/cancel-case-dialog.service';
 
 // ERROR
 import { mapErrorToUiError } from '@shared/error';
@@ -169,48 +130,29 @@ import { mapErrorToUiError } from '@shared/error';
 @Injectable({
   providedIn: 'root',
 })
-export class MakeDecisionFeature {
+export class CancelCaseFeature {
   private readonly governanceCommandsApi =
     inject(GovernanceCommandsApi);
 
   private readonly dialogService =
-    inject(MakeDecisionDialogService);
+    inject(CancelCaseDialogService);
 
-  public decide(
-    details: PrecomputedMakeDecisionPayload,
-    decisionKind: GovernanceDecisionKind,
-  ): void {
-    if (!details) {
-      this.dialogService.openInvalidPayload(decisionKind);
+  cancel(payload: CancelCaseFeaturePayload | null | undefined): void {
+    if (!payload) {
+      this.dialogService.openInvalidPayload();
       return;
     }
 
-    this.dialogService.openConfirmation(
-      decisionKind,
-      () => {
-        this.runDecision(
-          {
-            ...details,
-            kind: decisionKind,
-          },
-          decisionKind,
-        );
-      },
-    );
+    this.dialogService.openConfirmation(() => {
+      this.runCancel(payload);
+    });
   }
 
-  private runDecision(
-    payload: MakeDecisionFeaturePayload,
-    decisionKind: GovernanceDecisionKind,
-  ): void {
-    this.sendDecision(payload).subscribe({
+  private runCancel(payload: CancelCaseFeaturePayload): void {
+    this.sendCancel(payload).subscribe({
       next: ({ data }: { data: GovernanceResponseDto }) => {
         if (data.outcome === 'SUCCEEDED') {
-          this.dialogService.openSuccess(
-            decisionKind,
-            data,
-          );
-
+          this.dialogService.openSuccess(data);
           return;
         }
 
@@ -221,32 +163,24 @@ export class MakeDecisionFeature {
         const uiError = mapErrorToUiError(error);
 
         if (uiError.errorCode === 409) {
-          this.dialogService.openConflictError(
-            uiError,
-            decisionKind,
-          );
-
+          this.dialogService.openConflictError(uiError);
           return;
         }
 
-        this.dialogService.openSubmitError(
-          uiError,
-          decisionKind,
-        );
+        this.dialogService.openSubmitError(uiError);
       },
     });
   }
 
-  private sendDecision(
-    payload: MakeDecisionFeaturePayload,
+  private sendCancel(
+    payload: CancelCaseFeaturePayload,
   ) {
-    const requestBody: GovernanceDecisionRequestDto = {
-      kind: payload.kind,
+    const requestBody: GovernanceCaseCancelRequestDto = {
       expectedCaseVersion: payload.expectedCaseVersion,
       reason: payload.reason,
     };
 
-    return this.governanceCommandsApi.caseDecision(
+    return this.governanceCommandsApi.caseCancel(
       requestBody,
       payload.caseId,
     );
