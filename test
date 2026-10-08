@@ -1,188 +1,195 @@
-import { inject, Injectable } from '@angular/core';
+import { map, of, switchMap, type Observable } from 'rxjs';
 
-// ENTITIES
-import {
-  GOVERNANCE_OUTCOME_LABEL,
-  GOVERNANCE_PHASE_LABEL,
-} from '@entities/governance';
-import type { GovernanceResponseDto } from '@entities/governance';
+loadRowEditDiff(
+  props: LoadRowEditDiffProps,
+): Observable<LoadRowEditDiffResponse> {
+  const { intentRefId, rowEditPhase, targetCode } = props;
 
-// MODEL
-import { ERROR_CANCEL_CASE_NOTIFICATIONS } from './cancel-case-notifications.model';
+  return this.rowEditQueriesApi.getRowEditById(intentRefId).pipe(
+    switchMap(({ data: view }) => {
+      const { rowEdit } = view;
 
-// ERROR
-import type { UiError } from '@shared/error';
+      const needsLive =
+        rowEdit.operation === 'DELETE' ||
+        (rowEditPhase === 'OPEN' && rowEdit.operation === 'EDIT');
 
-// ICG
-import { MtModalService } from '@citi-icg-172888/ng-icgds/modal';
+      const live$ = needsLive
+        ? this.rowEditQueriesApi.getRowEditLiveById(intentRefId).pipe(
+            map(({ data }) => data),
+          )
+        : of(undefined);
 
-@Injectable()
-export class CancelCaseDialogService {
-  private readonly modalService = inject(MtModalService);
+      return live$.pipe(
+        map((live): LoadRowEditDiffResponse => {
+          const mapper =
+            rowEditPhase === 'OPEN'
+              ? mapRowEditDiff
+              : mapRowEditClosedDiff;
 
-  openInvalidPayload(): void {
-    const notification =
-      ERROR_CANCEL_CASE_NOTIFICATIONS.CANCEL_CASE_PAYLOAD_UNDEFINED;
-
-    this.modalService.open({
-      status: 'danger',
-      title: notification.title,
-      html: notification.html(),
-      type: 'alert',
-    });
-  }
-
-  openConfirmation(onAccept: () => void): void {
-    this.modalService.open({
-      status: 'warning',
-      title: 'Potwierdź anulowanie',
-      html: 'Czy na pewno chcesz anulować ten wniosek o zmianę?',
-      type: 'confirm',
-      afterUserAction: (event) => {
-        if (event.action === 'accept') {
-          onAccept();
-        }
-      },
-    });
-  }
-
-  openSuccess(data: GovernanceResponseDto): void {
-    this.modalService.open({
-      status: 'success',
-      title: 'Operacja zakończona pomyślnie.',
-      html: this.getResultHtml(data),
-      type: 'alert',
-    });
-  }
-
-  openUnsuccessfulResult(data: GovernanceResponseDto): void {
-    this.modalService.open({
-      status: 'warning',
-      title: 'Operacja nie została zakończona pomyślnie.',
-      html: this.getResultHtml(data),
-      type: 'alert',
-    });
-  }
-
-  openConflictError(uiError: UiError): void {
-    const notification =
-      ERROR_CANCEL_CASE_NOTIFICATIONS.CANCEL_CASE_SUBMIT_FAILED_BY_CONFLICT;
-
-    this.modalService.open({
-      status: 'danger',
-      title: notification.title,
-      html: notification.html({
-        uiError,
-      }),
-      type: 'alert',
-    });
-  }
-
-  openSubmitError(uiError: UiError): void {
-    const notification =
-      ERROR_CANCEL_CASE_NOTIFICATIONS.CANCEL_CASE_SUBMIT_FAILED;
-
-    this.modalService.open({
-      status: 'danger',
-      title: notification.title,
-      html: notification.html({
-        uiError,
-      }),
-      type: 'alert',
-    });
-  }
-
-  private getResultHtml(data: GovernanceResponseDto): string {
-    return `
-      <div>
-        <p>Wynik: ${
-          GOVERNANCE_OUTCOME_LABEL[data.outcome] ?? data.outcome
-        }</p>
-        <p>Etap: ${
-          GOVERNANCE_PHASE_LABEL[data.phase] ?? data.phase
-        }</p>
-      </div>
-    `;
-  }
+          return {
+            rowData: mapper(targetCode, view, live),
+            casePhase: view.caseRef.phase,
+            ...(rowEdit.operation === 'EDIT' && {
+              pkValue: rowEdit.rows[0].pkValue,
+              expectedVersion:
+                rowEdit.rows[0].expectedVersion ?? undefined,
+            }),
+            ...(rowEdit.operation === 'DELETE' && {
+              pkValue: rowEdit.deletePkValue,
+            }),
+          };
+        }),
+      );
+    }),
+  );
 }
 
 
 
 
-import { inject, Injectable } from '@angular/core';
 
-// ENTITIES
-import {
-  GovernanceCommandsApi,
-} from '@entities/governance';
-import type {
-  GovernanceCaseCancelRequestDto,
-  GovernanceResponseDto,
-} from '@entities/governance';
 
-// MODEL
-import type { CancelCaseFeaturePayload } from './model/cancel-case.model';
-import { CancelCaseDialogService } from './model/cancel-case-dialog.service';
+const mapFields = (
+  fields: RowEditFields,
+  targetCode: string | null | undefined,
+  groupName: string,
+): RowEditDiffRow[] =>
+  Object.entries(fields)
+    .filter(([, value]) => value !== undefined)
+    .map(([field, value]) => {
+      const fieldName = targetCode
+        ? fieldNameMap(field, targetCode)
+        : field;
 
-// ERROR
-import { mapErrorToUiError } from '@shared/error';
+      return {
+        field: fieldName,
+        currentValue: value!,
+        path: [groupName, fieldName],
+      };
+    });
 
-@Injectable({
-  providedIn: 'root',
-})
-export class CancelCaseFeature {
-  private readonly governanceCommandsApi =
-    inject(GovernanceCommandsApi);
 
-  private readonly dialogService =
-    inject(CancelCaseDialogService);
 
-  cancel(payload: CancelCaseFeaturePayload | null | undefined): void {
-    if (!payload) {
-      this.dialogService.openInvalidPayload();
-      return;
-    }
 
-    this.dialogService.openConfirmation(() => {
-      this.runCancel(payload);
+
+
+const mapFields = (
+  fields: RowEditFields,
+  targetCode: string | null | undefined,
+  groupName: string,
+): RowEditDiffRow[] => {
+  const rows: RowEditDiffRow[] = [];
+
+  for (const [field, currentValue] of Object.entries(fields)) {
+    if (currentValue === undefined) continue;
+
+    const fieldName = targetCode
+      ? fieldNameMap(field, targetCode)
+      : field;
+
+    rows.push({
+      field: fieldName,
+      currentValue,
+      path: [groupName, fieldName],
     });
   }
 
-  private runCancel(payload: CancelCaseFeaturePayload): void {
-    this.sendCancel(payload).subscribe({
-      next: ({ data }: { data: GovernanceResponseDto }) => {
-        if (data.outcome === 'SUCCEEDED') {
-          this.dialogService.openSuccess(data);
-          return;
-        }
+  return rows;
+};
 
-        this.dialogService.openUnsuccessfulResult(data);
-      },
 
-      error: (error: unknown) => {
-        const uiError = mapErrorToUiError(error);
 
-        if (uiError.errorCode === 409) {
-          this.dialogService.openConflictError(uiError);
-          return;
-        }
 
-        this.dialogService.openSubmitError(uiError);
-      },
-    });
-  }
 
-  private sendCancel(
-    payload: CancelCaseFeaturePayload,
-  ) {
-    const requestBody: GovernanceCaseCancelRequestDto = {
-      expectedCaseVersion: payload.expectedCaseVersion,
-      reason: payload.reason,
-    };
 
-    return this.governanceCommandsApi.caseCancel(
-      requestBody,
-      payload.caseId,
+const mapRowEditDiff = (
+  targetCode: string | null | undefined,
+  viewItem: RowEditViewItem,
+  liveItem?: RowEditLiveItem,
+): RowEditDiffRow[] => {
+  const { rowEdit } = viewItem;
+  const liveValues = liveItem?.rows[0]?.liveValues ?? {};
+
+  if (rowEdit.operation !== 'EDIT') {
+    const fields =
+      rowEdit.operation === 'CREATE'
+        ? rowEdit.createValues
+        : liveValues;
+
+    return mapFields(
+      fields,
+      targetCode,
+      ROW_EDIT_TREE_NAMES.FIELDS_TO_CHANGE,
     );
   }
-}
+
+  const changedRows: RowEditDiffRow[] = [];
+  const otherRows: RowEditDiffRow[] = [];
+
+  for (const [field, proposedValue] of Object.entries(
+    rowEdit.rows[0].newValues,
+  )) {
+    if (proposedValue === undefined) continue;
+
+    const currentValue = liveValues[field] ?? null;
+    const fieldName = targetCode
+      ? fieldNameMap(field, targetCode)
+      : field;
+
+    const isChanged = proposedValue !== currentValue;
+
+    const row: RowEditDiffRow = {
+      field: fieldName,
+      currentValue,
+      proposedValue,
+      path: [
+        isChanged
+          ? ROW_EDIT_TREE_NAMES.FIELDS_TO_CHANGE
+          : ROW_EDIT_TREE_NAMES.OTHER_FIELDS,
+        fieldName,
+      ],
+    };
+
+    if (isChanged) {
+      changedRows.push(row);
+    } else {
+      otherRows.push(row);
+    }
+  }
+
+  return [...changedRows, ...otherRows];
+};
+
+
+
+
+const mapRowEditClosedDiff = (
+  targetCode: string | null | undefined,
+  viewItem: RowEditViewItem,
+  liveItem?: RowEditLiveItem,
+): RowEditDiffRow[] => {
+  const { rowEdit } = viewItem;
+  let fields: RowEditFields;
+
+  switch (rowEdit.operation) {
+    case 'EDIT':
+      fields = rowEdit.rows[0].newValues;
+      break;
+
+    case 'CREATE':
+      fields = rowEdit.createValues;
+      break;
+
+    case 'DELETE':
+      fields = liveItem?.rows[0]?.liveValues ?? {};
+      break;
+  }
+
+  return mapFields(
+    fields,
+    targetCode,
+    ROW_EDIT_TREE_NAMES.ACCEPTED_FIELDS,
+  );
+};
+
+export { mapRowEditDiff, mapRowEditClosedDiff };
