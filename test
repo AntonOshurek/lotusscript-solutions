@@ -1,83 +1,211 @@
-type DecisionMessage = {
+type CancelCaseMessage = {
   title: string;
   html: string;
 };
 
-// Здесь весь словарь GOV_* из предыдущего ответа.
-const DECISION_ERROR_MESSAGES: Readonly<
-  Record<string, DecisionMessage>
-> = {
-  // GOV_CASE_VERSION_CONFLICT: { ... },
-  // ...
+const CANCEL_CASE_CONFIRMATION: CancelCaseMessage = {
+  title: 'Anulowanie wniosku',
+  html: `
+    <p>Czy na pewno chcesz anulować ten wniosek o zmianę danych?</p>
+    <p>Po anulowaniu wniosek nie będzie dalej rozpatrywany.</p>
+  `,
 };
 
-const INVALID_DECISION_MESSAGE: DecisionMessage = {
-  title: 'Nie można zapisać decyzji',
+const CANCEL_CASE_INVALID_PAYLOAD: CancelCaseMessage = {
+  title: 'Nie można anulować wniosku',
   html: `
-    <p>Nie udało się przygotować decyzji do zapisania.
-    Decyzja nie została wysłana.</p>
+    <p>Nie udało się przygotować anulowania wniosku.
+    Żądanie anulowania nie zostało wysłane.</p>
     <p>Odśwież wniosek i spróbuj ponownie.
     Jeśli problem się powtarza, skontaktuj się z administratorem.</p>
   `,
 };
 
-const DECISION_RESULT_MESSAGES = {
-  INCIDENT: {
-    title: 'Zmiana wymaga dodatkowej obsługi',
+const CANCEL_CASE_RESULT_MESSAGES = {
+  SUCCEEDED: {
+    title: 'Wniosek został anulowany',
     html: `
-      <p>Twoja decyzja została zapisana, ale podczas realizacji
-      zmiany wystąpił problem.</p>
-      <p>Wniosek oczekuje na obsługę przez uprawnioną osobę.
-      Nie wysyłaj ponownie tej samej decyzji ani nowego wniosku
-      dotyczącego tej zmiany.</p>
-      <p>Sprawdzaj status wniosku. Jeśli potrzebujesz wyjaśnień,
-      skontaktuj się z osobą obsługującą incydenty
-      lub administratorem.</p>
+      <p>Wniosek został pomyślnie anulowany.
+      Nie będzie dalej rozpatrywany.</p>
+    `,
+  },
+
+  INCIDENT: {
+    title: 'Wniosek wymaga dodatkowej obsługi',
+    html: `
+      <p>Wniosek oczekuje na wyjaśnienie problemu
+      przez uprawnioną osobę.
+      Nie można potwierdzić jego anulowania.</p>
+      <p>Sprawdź aktualny status wniosku.
+      Jeśli potrzebujesz wyjaśnień, skontaktuj się
+      z osobą obsługującą incydenty lub administratorem.</p>
     `,
   },
 
   CONFLICT_REFUSED: {
-    title: 'Zmiana nie została wprowadzona',
+    title: 'Wniosek został już zakończony',
     html: `
-      <p>Twoja decyzja została zapisana, ale zmiana nie mogła
-      zostać wprowadzona. Wniosek został zakończony,
-      a dane, których dotyczyła zmiana, pozostały bez zmian.</p>
-      <p>Sprawdź aktualne dane oraz przyczynę zakończenia
-      w szczegółach wniosku. Jeśli zmiana nadal jest potrzebna,
-      zgłoś nowy wniosek uwzględniający aktualny stan danych.</p>
+      <p>Zmiana opisana we wniosku nie została wprowadzona,
+      a wniosek został zakończony.</p>
+      <p>Nie wymaga on dalszego anulowania.
+      Sprawdź przyczynę zakończenia w szczegółach wniosku.</p>
     `,
   },
 
-  RECORDED: {
-    title: 'Decyzja została zapisana',
+  UNCONFIRMED: {
+    title: 'Sprawdź status wniosku',
     html: `
-      <p>Twoja decyzja została zapisana.
-      Sprawdź aktualny status wniosku, aby ustalić,
-      czy wymaga on dalszego rozpatrzenia lub obsługi.</p>
-      <p>Nie wysyłaj ponownie tej samej decyzji.</p>
+      <p>Nie udało się jednoznacznie potwierdzić
+      anulowania wniosku.</p>
+      <p>Odśwież wniosek i sprawdź jego aktualny status
+      przed ponowną próbą.
+      Jeśli problem nadal występuje,
+      skontaktuj się z administratorem.</p>
     `,
   },
-} satisfies Record<string, DecisionMessage>;
+} satisfies Record<string, CancelCaseMessage>;
 
-const FALLBACK_DECISION_ERROR_MESSAGES = {
-  INVALID_REQUEST: {
-    title: 'Nie można wykonać tej czynności',
+const CANCEL_CASE_ERROR_MESSAGES: Readonly<
+  Record<string, CancelCaseMessage>
+> = {
+  GOV_CASE_VERSION_CONFLICT: {
+    title: 'Wniosek został zmieniony',
     html: `
-      <p>Nie udało się wykonać wybranej czynności.
-      Dane wniosku lub wybrana czynność wymagają sprawdzenia.</p>
-      <p>Odśwież wniosek i sprawdź jego dane.
+      <p>Wniosek został zmieniony od czasu jego otwarcia.
+      Anulowanie nie zostało wykonane.</p>
+      <p>Odśwież wniosek i sprawdź jego aktualny status.
+      Jeśli anulowanie nadal jest dostępne,
+      możesz spróbować ponownie.</p>
+    `,
+  },
+
+  GOV_STAGE_STALE: {
+    title: 'Etap rozpatrywania wniosku uległ zmianie',
+    html: `
+      <p>Wniosek nie znajduje się już na etapie,
+      na którym próbowano go anulować.
+      Anulowanie nie zostało wykonane.</p>
+      <p>Odśwież wniosek i sprawdź dostępne działania.</p>
+    `,
+  },
+
+  GOV_CASE_NOT_ACTIONABLE: {
+    title: 'Anulowanie wniosku jest niedostępne',
+    html: `
+      <p>Obecny stan wniosku nie pozwala na jego anulowanie.
+      Wniosek może być już zakończony
+      lub oczekiwać na dalszą obsługę.</p>
+      <p>Odśwież wniosek i sprawdź jego aktualny status.</p>
+    `,
+  },
+
+  GOV_NOT_ELIGIBLE: {
+    title: 'Nie możesz anulować tego wniosku',
+    html: `
+      <p>Nie masz uprawnień do anulowania tego wniosku
+      lub wniosek nie jest dla Ciebie dostępny.</p>
+      <p>Wróć do listy wniosków i odśwież ją.
+      Jeśli uważasz, że anulowanie powinno być dostępne,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_RESOURCE_BUSY: {
+    title: 'Wniosek jest chwilowo niedostępny',
+    html: `
+      <p>Trwa wykonywanie innej czynności dotyczącej
+      tego wniosku lub powiązanych danych.
+      Anulowanie nie zostało wykonane.</p>
+      <p>Odczekaj chwilę, odśwież wniosek
+      i spróbuj ponownie.</p>
+    `,
+  },
+
+  GOV_RESOURCE_CONFLICT: {
+    title: 'Nie można anulować wniosku',
+    html: `
+      <p>Anulowanie nie mogło zostać wykonane
+      z powodu aktualnego stanu powiązanych spraw lub danych.</p>
+      <p>Odśwież wniosek i sprawdź dostępne działania.
       Jeśli problem nadal występuje,
       skontaktuj się z administratorem.</p>
     `,
   },
 
-  FORBIDDEN: DECISION_ERROR_MESSAGES['GOV_NOT_ELIGIBLE'],
+  GOV_CLIENT_KEY_CONFLICT: {
+    title: 'Nie można anulować wniosku',
+    html: `
+      <p>Żądanie anulowania koliduje
+      z innym wcześniejszym działaniem.
+      Anulowanie nie zostało wykonane.</p>
+      <p>Odśwież wniosek i sprawdź jego aktualny status.
+      Jeśli problem nadal występuje,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_EXECUTION_CONFLICT: {
+    title: 'Nie można anulować wniosku',
+    html: `
+      <p>Anulowanie nie może zostać wykonane
+      przy obecnym stanie wniosku lub jego danych.</p>
+      <p>Odśwież wniosek i sprawdź dostępne działania.
+      Jeśli problem nadal występuje,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_SCOPE_FACTS_MISSING: {
+    title: 'Nie można anulować wniosku',
+    html: `
+      <p>Wystąpił problem po stronie systemu,
+      który uniemożliwia anulowanie wniosku.
+      Anulowanie nie zostało wykonane.</p>
+      <p>Skontaktuj się z administratorem
+      i wskaż wniosek, którego dotyczy problem.</p>
+    `,
+  },
+
+  GOV_POLICY_VERSION_DRIFT: {
+    title: 'Nie można anulować wniosku',
+    html: `
+      <p>Nie udało się odczytać zasad wymaganych
+      do obsługi tego wniosku.
+      Anulowanie nie zostało wykonane.</p>
+      <p>Skontaktuj się z administratorem
+      i wskaż wniosek, którego dotyczy problem.</p>
+    `,
+  },
+};
+
+const CANCEL_CASE_FALLBACK_MESSAGES = {
+  INVALID_REQUEST: {
+    title: 'Nie można anulować wniosku',
+    html: `
+      <p>Żądanie anulowania nie mogło zostać przyjęte.
+      Anulowanie nie zostało wykonane.</p>
+      <p>Odśwież wniosek i sprawdź dostępne działania.
+      Jeśli problem nadal występuje,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  FORBIDDEN: {
+    title: 'Nie możesz anulować tego wniosku',
+    html: `
+      <p>Nie masz uprawnień do anulowania tego wniosku
+      lub wniosek nie jest dla Ciebie dostępny.</p>
+      <p>Wróć do listy wniosków i odśwież ją.
+      W razie wątpliwości skontaktuj się z administratorem.</p>
+    `,
+  },
 
   CONFLICT: {
-    title: 'Nie można wykonać tej czynności',
+    title: 'Nie można anulować wniosku',
     html: `
-      <p>Wybrana czynność nie może zostać wykonana
-      przy obecnym stanie wniosku lub powiązanych danych.</p>
+      <p>Obecny stan wniosku lub powiązanych danych
+      uniemożliwia anulowanie.
+      Anulowanie nie zostało wykonane.</p>
       <p>Odśwież wniosek i sprawdź dostępne działania.
       Jeśli problem nadal występuje,
       skontaktuj się z administratorem.</p>
@@ -85,125 +213,200 @@ const FALLBACK_DECISION_ERROR_MESSAGES = {
   },
 
   UNEXPECTED: {
-    title: 'Nie udało się potwierdzić wykonania czynności',
+    title: 'Nie udało się potwierdzić anulowania',
     html: `
       <p>Wystąpił nieoczekiwany problem.
-      Nie udało się potwierdzić, czy wybrana czynność
-      została wykonana.</p>
-      <p>Odśwież wniosek i sprawdź jego status oraz zapisane
-      decyzje przed ponowną próbą.
+      Nie udało się potwierdzić, czy wniosek został anulowany.</p>
+      <p>Odśwież wniosek i sprawdź jego aktualny status
+      przed ponowną próbą.
       Jeśli problem nadal występuje,
       skontaktuj się z administratorem.</p>
     `,
   },
-} satisfies Record<string, DecisionMessage>;
+} satisfies Record<string, CancelCaseMessage>;
 
-export type { DecisionMessage };
+export type { CancelCaseMessage };
 
 export {
-  DECISION_ERROR_MESSAGES,
-  INVALID_DECISION_MESSAGE,
-  DECISION_RESULT_MESSAGES,
-  FALLBACK_DECISION_ERROR_MESSAGES,
+  CANCEL_CASE_CONFIRMATION,
+  CANCEL_CASE_INVALID_PAYLOAD,
+  CANCEL_CASE_RESULT_MESSAGES,
+  CANCEL_CASE_ERROR_MESSAGES,
+  CANCEL_CASE_FALLBACK_MESSAGES,
 };
 
 
 
 
-import {
-  DECISION_ERROR_MESSAGES,
-  DECISION_RESULT_MESSAGES,
-  FALLBACK_DECISION_ERROR_MESSAGES,
-  INVALID_DECISION_MESSAGE,
-  SUCCESS_MAKE_DECISION_NOTIFICATION,
-} from './case-decision-notifications.model';
+
+
+
+
+
+
+
+
+
+
+
+
+import { inject, Injectable } from '@angular/core';
 
 import type {
-  DecisionMessage,
-} from './case-decision-notifications.model';
+  GovernanceCaseDecisionResponse,
+} from '@entities/governance';
 
+import {
+  mapErrorToUiError,
+  type UiError,
+} from '@shared/error';
 
+import {
+  MtModalService,
+} from '@citi-icg-172888/ng-icgds/modal';
 
+import {
+  CANCEL_CASE_CONFIRMATION,
+  CANCEL_CASE_ERROR_MESSAGES,
+  CANCEL_CASE_FALLBACK_MESSAGES,
+  CANCEL_CASE_INVALID_PAYLOAD,
+  CANCEL_CASE_RESULT_MESSAGES,
+  type CancelCaseMessage,
+} from './cancel-case-notifications.model';
 
+@Injectable()
+export class CancelCaseDialogService {
+  private readonly modalService = inject(MtModalService);
 
-openResponseError(
-  err: unknown,
-  _decisionKind: GovernanceDecisionKind,
-): void {
-  const uiError = mapErrorToUiError(err);
-  const detail = uiError.backendError?.detail;
-
-  const message =
-    typeof detail === 'string'
-      ? DECISION_ERROR_MESSAGES[detail]
-      : undefined;
-
-  this.openAlert(
-    'danger',
-    message ?? this.getFallbackErrorMessage(uiError.errorCode),
-  );
-}
-
-openInvalidPayload(
-  _decisionKind: GovernanceDecisionKind,
-): void {
-  this.openAlert('danger', INVALID_DECISION_MESSAGE);
-}
-
-openSuccess(
-  decisionKind: GovernanceDecisionKind,
-  data: GovernanceCaseDecisionResponse,
-): void {
-  if (data.phase === 'INCIDENT') {
-    this.openAlert('warning', DECISION_RESULT_MESSAGES.INCIDENT);
-    return;
+  openInvalidPayload(): void {
+    this.openAlert('danger', CANCEL_CASE_INVALID_PAYLOAD);
   }
 
-  if (data.outcome === 'CONFLICT_REFUSED') {
+  openConfirmation(onAccept: () => void): void {
+    this.modalService.open({
+      status: 'warning',
+      title: CANCEL_CASE_CONFIRMATION.title,
+      html: CANCEL_CASE_CONFIRMATION.html,
+      type: 'confirm',
+      afterUserAction: event => {
+        if (event.action === 'accept') {
+          onAccept();
+        }
+      },
+    });
+  }
+
+  openResponseError(err: unknown): void {
+    const uiError = mapErrorToUiError(err);
+    const detail = uiError.backendError?.detail;
+
+    const message =
+      typeof detail === 'string'
+        ? CANCEL_CASE_ERROR_MESSAGES[detail]
+        : undefined;
+
+    this.openAlert(
+      'danger',
+      message ?? this.getFallbackErrorMessage(uiError.errorCode),
+    );
+  }
+
+  openSuccess(data: GovernanceCaseDecisionResponse): void {
+    if (data.phase === 'INCIDENT') {
+      this.openAlert(
+        'warning',
+        CANCEL_CASE_RESULT_MESSAGES.INCIDENT,
+      );
+      return;
+    }
+
+    if (
+      data.phase === 'CLOSED' &&
+      data.outcome === 'CONFLICT_REFUSED'
+    ) {
+      this.openAlert(
+        'warning',
+        CANCEL_CASE_RESULT_MESSAGES.CONFLICT_REFUSED,
+      );
+      return;
+    }
+
+    if (
+      data.phase === 'CLOSED' &&
+      data.outcome === 'SUCCEEDED'
+    ) {
+      this.openAlert(
+        'success',
+        CANCEL_CASE_RESULT_MESSAGES.SUCCEEDED,
+      );
+      return;
+    }
+
     this.openAlert(
       'warning',
-      DECISION_RESULT_MESSAGES.CONFLICT_REFUSED,
+      CANCEL_CASE_RESULT_MESSAGES.UNCONFIRMED,
     );
-    return;
   }
 
-  if (data.outcome === 'SUCCEEDED') {
-    this.openAlert(
-      'success',
-      SUCCESS_MAKE_DECISION_NOTIFICATION[decisionKind],
-    );
-    return;
+  private getFallbackErrorMessage(
+    errorCode: UiError['errorCode'],
+  ): CancelCaseMessage {
+    switch (errorCode) {
+      case 400:
+        return CANCEL_CASE_FALLBACK_MESSAGES.INVALID_REQUEST;
+
+      case 403:
+        return CANCEL_CASE_FALLBACK_MESSAGES.FORBIDDEN;
+
+      case 409:
+        return CANCEL_CASE_FALLBACK_MESSAGES.CONFLICT;
+
+      default:
+        return CANCEL_CASE_FALLBACK_MESSAGES.UNEXPECTED;
+    }
   }
 
-  this.openAlert('warning', DECISION_RESULT_MESSAGES.RECORDED);
+  private openAlert(
+    status: 'danger' | 'warning' | 'success',
+    message: CancelCaseMessage,
+  ): void {
+    this.modalService.open({
+      status,
+      title: message.title,
+      html: message.html,
+      type: 'alert',
+    });
+  }
 }
 
-private getFallbackErrorMessage(
-  errorCode: UiError['errorCode'],
-): DecisionMessage {
-  switch (errorCode) {
-    case 400:
-      return FALLBACK_DECISION_ERROR_MESSAGES.INVALID_REQUEST;
 
-    case 403:
-      return FALLBACK_DECISION_ERROR_MESSAGES.FORBIDDEN;
 
-    case 409:
-      return FALLBACK_DECISION_ERROR_MESSAGES.CONFLICT;
 
-    default:
-      return FALLBACK_DECISION_ERROR_MESSAGES.UNEXPECTED;
-  }
-}
 
-private openAlert(
-  status: 'danger' | 'warning' | 'success',
-  message: DecisionMessage,
-): void {
-  this.modalService.open({
-    status,
-    title: message.title,
-    html: message.html,
-    type: 'alert',
-  });
+
+
+
+
+
+
+
+
+private sendCancelCase(payload: CancelCaseFeaturePayload): void {
+  this.loaderService.show();
+
+  this.governanceCommandsApi
+    .caseCancel(payload, payload.caseId)
+    .pipe(
+      finalize(() => this.loaderService.hide()),
+    )
+    .subscribe({
+      next: data => {
+        this.caseRefreshEvent.refreshCase(+payload.caseId);
+        this.dialogService.openSuccess(data);
+      },
+      error: (error: unknown) => {
+        this.caseRefreshEvent.refreshCase(+payload.caseId);
+        this.dialogService.openResponseError(error);
+      },
+    });
 }
