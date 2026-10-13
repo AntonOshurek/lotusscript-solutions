@@ -1,195 +1,316 @@
-import { map, of, switchMap, type Observable } from 'rxjs';
+type DecisionMessage = {
+  title: string;
+  html: string;
+};
 
-loadRowEditDiff(
-  props: LoadRowEditDiffProps,
-): Observable<LoadRowEditDiffResponse> {
-  const { intentRefId, rowEditPhase, targetCode } = props;
+const DECISION_ERROR_MESSAGES: Readonly<Record<string, DecisionMessage>> = {
+  GOV_CASE_VERSION_CONFLICT: {
+    title: 'Wniosek został zmieniony',
+    html: `
+      <p>Wniosek został zmieniony od czasu jego otwarcia.
+      Twoja decyzja nie została zapisana.</p>
+      <p>Odśwież wniosek, sprawdź jego aktualne dane
+      i ponownie podejmij decyzję.</p>
+    `,
+  },
 
-  return this.rowEditQueriesApi.getRowEditById(intentRefId).pipe(
-    switchMap(({ data: view }) => {
-      const { rowEdit } = view;
+  GOV_STAGE_STALE: {
+    title: 'Etap rozpatrywania wniosku uległ zmianie',
+    html: `
+      <p>Wybrana czynność nie jest już dostępna na obecnym etapie.
+      Nie została wykonana.</p>
+      <p>Odśwież wniosek i sprawdź dostępne działania.</p>
+    `,
+  },
 
-      const needsLive =
-        rowEdit.operation === 'DELETE' ||
-        (rowEditPhase === 'OPEN' && rowEdit.operation === 'EDIT');
+  GOV_CASE_NOT_ACTIONABLE: {
+    title: 'Nie można wykonać tej czynności',
+    html: `
+      <p>Obecny stan wniosku nie pozwala na wykonanie wybranej czynności.
+      Wniosek może być już zakończony lub oczekiwać na dalszą obsługę.</p>
+      <p>Odśwież wniosek i sprawdź jego aktualny status.</p>
+    `,
+  },
 
-      const live$ = needsLive
-        ? this.rowEditQueriesApi.getRowEditLiveById(intentRefId).pipe(
-            map(({ data }) => data),
-          )
-        : of(undefined);
+  GOV_DUPLICATE_DECISION: {
+    title: 'Decyzja została już zapisana',
+    html: `
+      <p>Twoja decyzja na tym etapie rozpatrywania wniosku
+      została już zapisana. Nie można zapisać kolejnej.</p>
+      <p>Odśwież wniosek, aby sprawdzić jego aktualny status.</p>
+    `,
+  },
 
-      return live$.pipe(
-        map((live): LoadRowEditDiffResponse => {
-          const mapper =
-            rowEditPhase === 'OPEN'
-              ? mapRowEditDiff
-              : mapRowEditClosedDiff;
+  GOV_SOD_VIOLATION: {
+    title: 'Nie możesz podjąć decyzji w tej sprawie',
+    html: `
+      <p>Zasady rozpatrywania wniosków nie pozwalają Ci podjąć
+      decyzji w tej sprawie. Autor wniosku nie może go zatwierdzić.</p>
+      <p>Decyzję musi podjąć inna uprawniona osoba.</p>
+    `,
+  },
 
-          return {
-            rowData: mapper(targetCode, view, live),
-            casePhase: view.caseRef.phase,
-            ...(rowEdit.operation === 'EDIT' && {
-              pkValue: rowEdit.rows[0].pkValue,
-              expectedVersion:
-                rowEdit.rows[0].expectedVersion ?? undefined,
-            }),
-            ...(rowEdit.operation === 'DELETE' && {
-              pkValue: rowEdit.deletePkValue,
-            }),
-          };
-        }),
-      );
-    }),
+  GOV_MAKER_NOT_AUTHORIZED: {
+    title: 'Nie można zatwierdzić wniosku',
+    html: `
+      <p>Autor wniosku nie ma już uprawnień wymaganych
+      do zgłoszenia tej zmiany. Twoja decyzja nie została zapisana.</p>
+      <p>Wniosek pozostaje otwarty i może zostać odrzucony
+      przez uprawnioną osobę. W razie wątpliwości
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_RESOURCE_BUSY: {
+    title: 'Wniosek jest chwilowo niedostępny',
+    html: `
+      <p>Trwa wykonywanie innej czynności dotyczącej tego wniosku
+      lub powiązanych danych. Twoja czynność nie została wykonana.</p>
+      <p>Odczekaj chwilę, odśwież wniosek i spróbuj ponownie.</p>
+    `,
+  },
+
+  GOV_RESOURCE_CONFLICT: {
+    title: 'Nie można wykonać tej czynności',
+    html: `
+      <p>Wybrana czynność koliduje z innym wnioskiem
+      lub aktualnym stanem powiązanych danych.</p>
+      <p>Odśwież wniosek i sprawdź powiązane sprawy.
+      Jeśli problem nadal występuje, skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_CLIENT_KEY_CONFLICT: {
+    title: 'Nie można zapisać czynności',
+    html: `
+      <p>Nie udało się zapisać wybranej czynności.
+      Mogła zostać powiązana z innym wcześniejszym działaniem.</p>
+      <p>Odśwież wniosek i sprawdź jego aktualny status.
+      Jeśli czynność nadal jest dostępna, wykonaj ją ponownie.
+      Jeśli problem się powtarza, skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_EXECUTION_CONFLICT: {
+    title: 'Nie można wykonać tej czynności',
+    html: `
+      <p>Wybrana czynność nie może zostać wykonana
+      przy obecnym stanie wniosku lub jego danych.</p>
+      <p>Odśwież wniosek i sprawdź jego aktualny status oraz dane.
+      Jeśli problem nadal występuje, skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_SCOPE_FACTS_MISSING: {
+    title: 'Nie można rozpatrzyć wniosku',
+    html: `
+      <p>Wystąpił problem po stronie systemu,
+      który uniemożliwia rozpatrzenie wniosku.
+      Wybrana czynność nie została wykonana.</p>
+      <p>Skontaktuj się z administratorem i wskaż wniosek,
+      którego dotyczy problem.</p>
+    `,
+  },
+
+  GOV_POLICY_VERSION_DRIFT: {
+    title: 'Nie można rozpatrzyć wniosku',
+    html: `
+      <p>Nie udało się odczytać zasad wymaganych
+      do rozpatrzenia tego wniosku.
+      Wybrana czynność nie została wykonana.</p>
+      <p>Skontaktuj się z administratorem i wskaż wniosek,
+      którego dotyczy problem.</p>
+    `,
+  },
+
+  GOV_NOT_ELIGIBLE: {
+    title: 'Nie można wykonać tej czynności',
+    html: `
+      <p>Nie masz uprawnień do wykonania tej czynności
+      lub wniosek nie jest dla Ciebie dostępny.</p>
+      <p>Wróć do listy wniosków i odśwież ją.
+      Jeśli potrzebujesz dostępu do tej sprawy,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_INTENT_INVALID: {
+    title: 'Dane wniosku wymagają poprawy',
+    html: `
+      <p>Niektóre dane wniosku są nieprawidłowe.
+      Wybrana czynność nie została wykonana.</p>
+      <p>Sprawdź dane wniosku. Jeśli nie możesz ich poprawić,
+      skontaktuj się z jego autorem lub administratorem.</p>
+    `,
+  },
+
+  GOV_QUORUM_INFEASIBLE: {
+    title: 'Brakuje osób uprawnionych do zatwierdzenia',
+    html: `
+      <p>Nie ma wystarczającej liczby uprawnionych osób,
+      aby zatwierdzić tę zmianę.
+      Wybrana czynność nie została wykonana.</p>
+      <p>Skontaktuj się z administratorem,
+      aby ustalić dalszy sposób rozpatrzenia wniosku.</p>
+    `,
+  },
+
+  GOV_TARGET_NOT_REGISTERED: {
+    title: 'Ten rodzaj zmiany jest niedostępny',
+    html: `
+      <p>System nie może obecnie obsłużyć zmiany,
+      której dotyczy ten wniosek.
+      Wybrana czynność nie została wykonana.</p>
+      <p>Skontaktuj się z administratorem i wskaż wniosek,
+      którego dotyczy problem.</p>
+    `,
+  },
+};
+
+
+
+openResponseError(
+  err: unknown,
+  _decisionKind: GovernanceDecisionKind,
+): void {
+  const uiError = mapErrorToUiError(err);
+  const detail = uiError.backendError?.detail;
+
+  const message =
+    typeof detail === 'string'
+      ? DECISION_ERROR_MESSAGES[detail]
+      : undefined;
+
+  this.openAlert(
+    'danger',
+    message ?? this.getFallbackErrorMessage(uiError.errorCode),
   );
 }
 
+openInvalidPayload(
+  _decisionKind: GovernanceDecisionKind,
+): void {
+  this.openAlert('danger', {
+    title: 'Nie można zapisać decyzji',
+    html: `
+      <p>Nie udało się przygotować decyzji do zapisania.
+      Decyzja nie została wysłana.</p>
+      <p>Odśwież wniosek i spróbuj ponownie.
+      Jeśli problem się powtarza, skontaktuj się z administratorem.</p>
+    `,
+  });
+}
 
+openSuccess(
+  decisionKind: GovernanceDecisionKind,
+  data: GovernanceCaseDecisionResponse,
+): void {
+  if (data.phase === 'INCIDENT') {
+    this.openAlert('warning', {
+      title: 'Zmiana wymaga dodatkowej obsługi',
+      html: `
+        <p>Twoja decyzja została zapisana, ale podczas realizacji
+        zmiany wystąpił problem.</p>
+        <p>Wniosek oczekuje na obsługę przez uprawnioną osobę.
+        Nie wysyłaj ponownie tej samej decyzji ani nowego wniosku
+        dotyczącego tej zmiany.</p>
+        <p>Sprawdzaj status wniosku. Jeśli potrzebujesz wyjaśnień,
+        skontaktuj się z osobą obsługującą incydenty
+        lub administratorem.</p>
+      `,
+    });
+    return;
+  }
 
+  if (data.outcome === 'CONFLICT_REFUSED') {
+    this.openAlert('warning', {
+      title: 'Zmiana nie została wprowadzona',
+      html: `
+        <p>Twoja decyzja została zapisana, ale zmiana nie mogła
+        zostać wprowadzona. Wniosek został zakończony,
+        a dane, których dotyczyła zmiana, pozostały bez zmian.</p>
+        <p>Sprawdź aktualne dane oraz przyczynę zakończenia
+        w szczegółach wniosku. Jeśli zmiana nadal jest potrzebna,
+        zgłoś nowy wniosek uwzględniający aktualny stan danych.</p>
+      `,
+    });
+    return;
+  }
 
+  if (data.outcome === 'SUCCEEDED') {
+    this.openAlert('success', {
+      title: SUCCESS_MAKE_DECISION_NOTIFICATION[decisionKind].title,
+      html: SUCCESS_MAKE_DECISION_NOTIFICATION[decisionKind].html,
+    });
+    return;
+  }
 
+  this.openAlert('warning', {
+    title: 'Decyzja została zapisana',
+    html: `
+      <p>Twoja decyzja została zapisana.
+      Sprawdź aktualny status wniosku, aby ustalić,
+      czy wymaga on dalszego rozpatrzenia lub obsługi.</p>
+      <p>Nie wysyłaj ponownie tej samej decyzji.</p>
+    `,
+  });
+}
 
-const mapFields = (
-  fields: RowEditFields,
-  targetCode: string | null | undefined,
-  groupName: string,
-): RowEditDiffRow[] =>
-  Object.entries(fields)
-    .filter(([, value]) => value !== undefined)
-    .map(([field, value]) => {
-      const fieldName = targetCode
-        ? fieldNameMap(field, targetCode)
-        : field;
-
+private getFallbackErrorMessage(
+  errorCode: UiError['errorCode'],
+): DecisionMessage {
+  switch (errorCode) {
+    case 400:
       return {
-        field: fieldName,
-        currentValue: value!,
-        path: [groupName, fieldName],
+        title: 'Nie można wykonać tej czynności',
+        html: `
+          <p>Nie udało się wykonać wybranej czynności.
+          Dane wniosku lub wybrana czynność wymagają sprawdzenia.</p>
+          <p>Odśwież wniosek i sprawdź jego dane.
+          Jeśli problem nadal występuje,
+          skontaktuj się z administratorem.</p>
+        `,
       };
-    });
 
+    case 403:
+      return DECISION_ERROR_MESSAGES['GOV_NOT_ELIGIBLE'];
 
+    case 409:
+      return {
+        title: 'Nie można wykonać tej czynności',
+        html: `
+          <p>Wybrana czynność nie może zostać wykonana
+          przy obecnym stanie wniosku lub powiązanych danych.</p>
+          <p>Odśwież wniosek i sprawdź dostępne działania.
+          Jeśli problem nadal występuje,
+          skontaktuj się z administratorem.</p>
+        `,
+      };
 
-
-
-
-const mapFields = (
-  fields: RowEditFields,
-  targetCode: string | null | undefined,
-  groupName: string,
-): RowEditDiffRow[] => {
-  const rows: RowEditDiffRow[] = [];
-
-  for (const [field, currentValue] of Object.entries(fields)) {
-    if (currentValue === undefined) continue;
-
-    const fieldName = targetCode
-      ? fieldNameMap(field, targetCode)
-      : field;
-
-    rows.push({
-      field: fieldName,
-      currentValue,
-      path: [groupName, fieldName],
-    });
+    default:
+      return {
+        title: 'Nie udało się potwierdzić wykonania czynności',
+        html: `
+          <p>Wystąpił nieoczekiwany problem.
+          Nie udało się potwierdzić, czy wybrana czynność
+          została wykonana.</p>
+          <p>Odśwież wniosek i sprawdź jego status oraz zapisane
+          decyzje przed ponowną próbą.
+          Jeśli problem nadal występuje,
+          skontaktuj się z administratorem.</p>
+        `,
+      };
   }
+}
 
-  return rows;
-};
-
-
-
-
-
-
-const mapRowEditDiff = (
-  targetCode: string | null | undefined,
-  viewItem: RowEditViewItem,
-  liveItem?: RowEditLiveItem,
-): RowEditDiffRow[] => {
-  const { rowEdit } = viewItem;
-  const liveValues = liveItem?.rows[0]?.liveValues ?? {};
-
-  if (rowEdit.operation !== 'EDIT') {
-    const fields =
-      rowEdit.operation === 'CREATE'
-        ? rowEdit.createValues
-        : liveValues;
-
-    return mapFields(
-      fields,
-      targetCode,
-      ROW_EDIT_TREE_NAMES.FIELDS_TO_CHANGE,
-    );
-  }
-
-  const changedRows: RowEditDiffRow[] = [];
-  const otherRows: RowEditDiffRow[] = [];
-
-  for (const [field, proposedValue] of Object.entries(
-    rowEdit.rows[0].newValues,
-  )) {
-    if (proposedValue === undefined) continue;
-
-    const currentValue = liveValues[field] ?? null;
-    const fieldName = targetCode
-      ? fieldNameMap(field, targetCode)
-      : field;
-
-    const isChanged = proposedValue !== currentValue;
-
-    const row: RowEditDiffRow = {
-      field: fieldName,
-      currentValue,
-      proposedValue,
-      path: [
-        isChanged
-          ? ROW_EDIT_TREE_NAMES.FIELDS_TO_CHANGE
-          : ROW_EDIT_TREE_NAMES.OTHER_FIELDS,
-        fieldName,
-      ],
-    };
-
-    if (isChanged) {
-      changedRows.push(row);
-    } else {
-      otherRows.push(row);
-    }
-  }
-
-  return [...changedRows, ...otherRows];
-};
-
-
-
-
-const mapRowEditClosedDiff = (
-  targetCode: string | null | undefined,
-  viewItem: RowEditViewItem,
-  liveItem?: RowEditLiveItem,
-): RowEditDiffRow[] => {
-  const { rowEdit } = viewItem;
-  let fields: RowEditFields;
-
-  switch (rowEdit.operation) {
-    case 'EDIT':
-      fields = rowEdit.rows[0].newValues;
-      break;
-
-    case 'CREATE':
-      fields = rowEdit.createValues;
-      break;
-
-    case 'DELETE':
-      fields = liveItem?.rows[0]?.liveValues ?? {};
-      break;
-  }
-
-  return mapFields(
-    fields,
-    targetCode,
-    ROW_EDIT_TREE_NAMES.ACCEPTED_FIELDS,
-  );
-};
-
-export { mapRowEditDiff, mapRowEditClosedDiff };
+private openAlert(
+  status: 'danger' | 'warning' | 'success',
+  message: DecisionMessage,
+): void {
+  this.modalService.open({
+    status,
+    title: message.title,
+    html: message.html,
+    type: 'alert',
+  });
+}
