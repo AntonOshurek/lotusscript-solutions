@@ -1,1 +1,186 @@
+// shared/notifications/model/notification-dialog-config.model.ts
+import type {
+  NotificationMessage,
+} from './notification-message.model';
 
+export type NotificationErrorFallbacks = {
+  readonly invalidRequest: NotificationMessage;
+  readonly forbidden: NotificationMessage;
+  readonly conflict: NotificationMessage;
+  readonly unexpected: NotificationMessage;
+};
+
+export type NotificationDialogConfig<TAction extends string> = {
+  readonly invalidPayload: NotificationMessage;
+
+  readonly confirmation: Readonly<
+    Record<TAction, NotificationMessage>
+  >;
+
+  readonly errors: Readonly<
+    Partial<Record<string, NotificationMessage>>
+  >;
+
+  readonly fallback: NotificationErrorFallbacks;
+};
+
+
+
+
+
+
+// shared/notifications/model/notification-dialog.base.ts
+import { inject } from '@angular/core';
+import { MtModalService } from '@citi-icg-172888/ng-icgds/modal';
+
+import {
+  mapErrorToUiError,
+  type UiError,
+} from '@shared/error';
+
+import type {
+  NotificationDialogConfig,
+} from './notification-dialog-config.model';
+
+import type {
+  NotificationMessage,
+} from './notification-message.model';
+
+export abstract class NotificationDialogBase<
+  TAction extends string,
+> {
+  private readonly modalService = inject(MtModalService);
+
+  protected constructor(
+    private readonly config: NotificationDialogConfig<TAction>,
+  ) {}
+
+  openInvalidPayload(): void {
+    this.openAlert('danger', this.config.invalidPayload);
+  }
+
+  openConfirmation(
+    action: TAction,
+    onAccept: () => void,
+  ): void {
+    const message = this.config.confirmation[action];
+
+    this.modalService.open({
+      status: 'warning',
+      title: message.title,
+      html: message.html,
+      type: 'confirm',
+      afterUserAction: event => {
+        if (event.action === 'accept') {
+          onAccept();
+        }
+      },
+    });
+  }
+
+  openResponseError(err: unknown): void {
+    const uiError = mapErrorToUiError(err);
+    const detail = uiError.backendError?.detail;
+
+    const message =
+      typeof detail === 'string' &&
+      Object.prototype.hasOwnProperty.call(this.config.errors, detail)
+        ? this.config.errors[detail]
+        : undefined;
+
+    this.openAlert(
+      'danger',
+      message ?? this.getFallbackErrorMessage(uiError.errorCode),
+    );
+  }
+
+  protected getFallbackErrorMessage(
+    errorCode: UiError['errorCode'],
+  ): NotificationMessage {
+    switch (errorCode) {
+      case 400:
+        return this.config.fallback.invalidRequest;
+
+      case 403:
+        return this.config.fallback.forbidden;
+
+      case 409:
+        return this.config.fallback.conflict;
+
+      default:
+        return this.config.fallback.unexpected;
+    }
+  }
+
+  protected openAlert(
+    status: 'danger' | 'warning' | 'success',
+    message: NotificationMessage,
+  ): void {
+    this.modalService.open({
+      status,
+      title: message.title,
+      html: message.html,
+      type: 'alert',
+    });
+  }
+}
+
+
+
+
+
+
+import type { IncidentDecisionKind } from '@entities/governance';
+
+import type {
+  NotificationDialogConfig,
+} from '@shared/notifications';
+
+const INCIDENT_DIALOG_CONFIG = {
+  invalidPayload: INCIDENT_INVALID_PAYLOAD_MESSAGE,
+
+  confirmation: INCIDENT_CONFIRMATION_MESSAGES,
+
+  errors: INCIDENT_ERROR_MESSAGES,
+
+  fallback: {
+    invalidRequest: INCIDENT_FALLBACK_MESSAGES.INVALID_REQUEST,
+    forbidden: INCIDENT_FALLBACK_MESSAGES.FORBIDDEN,
+    conflict: INCIDENT_FALLBACK_MESSAGES.CONFLICT,
+    unexpected: INCIDENT_FALLBACK_MESSAGES.UNEXPECTED,
+  },
+} satisfies NotificationDialogConfig<IncidentDecisionKind>;
+
+export { INCIDENT_DIALOG_CONFIG };
+
+
+
+
+
+
+import { Injectable } from '@angular/core';
+
+import type { IncidentDecisionKind } from '@entities/governance';
+
+import { NotificationDialogBase } from '@shared/notifications';
+
+import {
+  INCIDENT_DIALOG_CONFIG,
+  INCIDENT_SUCCESS_MESSAGES,
+} from './incident-decision-notifications.model';
+
+@Injectable()
+export class IncidentDecisionDialogService
+  extends NotificationDialogBase<IncidentDecisionKind> {
+
+  constructor() {
+    super(INCIDENT_DIALOG_CONFIG);
+  }
+
+  openSuccess(decisionKind: IncidentDecisionKind): void {
+    this.openAlert(
+      'success',
+      INCIDENT_SUCCESS_MESSAGES[decisionKind],
+    );
+  }
+}
