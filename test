@@ -1,128 +1,32 @@
-// shared/notifications/model/notification-dialog-config.model.ts
-import type {
-  NotificationMessage,
-} from './notification-message.model';
+openConfirmation(
+  action: TAction,
+  onAccept: () => void,
+): void {
+  this.openConfirmationMessage(
+    this.config.confirmation[action],
+    onAccept,
+  );
+}
 
-export type NotificationErrorFallbacks = {
-  readonly invalidRequest: NotificationMessage;
-  readonly forbidden: NotificationMessage;
-  readonly conflict: NotificationMessage;
-  readonly unexpected: NotificationMessage;
-};
+protected openConfirmationMessage(
+  message: NotificationMessage,
+  onAccept: () => void,
+  onReject?: () => void,
+): void {
+  this.modalService.open({
+    status: 'warning',
+    title: message.title,
+    html: message.html,
+    type: 'confirm',
+    afterUserAction: event => {
+      if (event.action === 'accept') {
+        onAccept();
+        return;
+      }
 
-export type NotificationDialogConfig<TAction extends string> = {
-  readonly invalidPayload: NotificationMessage;
-
-  readonly confirmation: Readonly<
-    Record<TAction, NotificationMessage>
-  >;
-
-  readonly errors: Readonly<
-    Partial<Record<string, NotificationMessage>>
-  >;
-
-  readonly fallback: NotificationErrorFallbacks;
-};
-
-
-
-
-
-
-// shared/notifications/model/notification-dialog.base.ts
-import { inject } from '@angular/core';
-import { MtModalService } from '@citi-icg-172888/ng-icgds/modal';
-
-import {
-  mapErrorToUiError,
-  type UiError,
-} from '@shared/error';
-
-import type {
-  NotificationDialogConfig,
-} from './notification-dialog-config.model';
-
-import type {
-  NotificationMessage,
-} from './notification-message.model';
-
-export abstract class NotificationDialogBase<
-  TAction extends string,
-> {
-  private readonly modalService = inject(MtModalService);
-
-  protected constructor(
-    private readonly config: NotificationDialogConfig<TAction>,
-  ) {}
-
-  openInvalidPayload(): void {
-    this.openAlert('danger', this.config.invalidPayload);
-  }
-
-  openConfirmation(
-    action: TAction,
-    onAccept: () => void,
-  ): void {
-    const message = this.config.confirmation[action];
-
-    this.modalService.open({
-      status: 'warning',
-      title: message.title,
-      html: message.html,
-      type: 'confirm',
-      afterUserAction: event => {
-        if (event.action === 'accept') {
-          onAccept();
-        }
-      },
-    });
-  }
-
-  openResponseError(err: unknown): void {
-    const uiError = mapErrorToUiError(err);
-    const detail = uiError.backendError?.detail;
-
-    const message =
-      typeof detail === 'string' &&
-      Object.prototype.hasOwnProperty.call(this.config.errors, detail)
-        ? this.config.errors[detail]
-        : undefined;
-
-    this.openAlert(
-      'danger',
-      message ?? this.getFallbackErrorMessage(uiError.errorCode),
-    );
-  }
-
-  protected getFallbackErrorMessage(
-    errorCode: UiError['errorCode'],
-  ): NotificationMessage {
-    switch (errorCode) {
-      case 400:
-        return this.config.fallback.invalidRequest;
-
-      case 403:
-        return this.config.fallback.forbidden;
-
-      case 409:
-        return this.config.fallback.conflict;
-
-      default:
-        return this.config.fallback.unexpected;
-    }
-  }
-
-  protected openAlert(
-    status: 'danger' | 'warning' | 'success',
-    message: NotificationMessage,
-  ): void {
-    this.modalService.open({
-      status,
-      title: message.title,
-      html: message.html,
-      type: 'alert',
-    });
-  }
+      onReject?.();
+    },
+  });
 }
 
 
@@ -130,28 +34,287 @@ export abstract class NotificationDialogBase<
 
 
 
-import type { IncidentDecisionKind } from '@entities/governance';
+
+import type { RowEditValue } from '@entities/row-edit';
 
 import type {
   NotificationDialogConfig,
+  NotificationMessage,
 } from '@shared/notifications';
 
-const INCIDENT_DIALOG_CONFIG = {
-  invalidPayload: INCIDENT_INVALID_PAYLOAD_MESSAGE,
+type UpdateRowConfirmationData = {
+  readonly recordIdLabel: string;
+  readonly recordId: string;
+  readonly fields: ReadonlyArray<{
+    readonly label: string;
+    readonly oldValue: RowEditValue;
+    readonly newValue: RowEditValue;
+  }>;
+};
 
-  confirmation: INCIDENT_CONFIRMATION_MESSAGES,
+const UPDATE_ROW_CONFIRMATION: NotificationMessage = {
+  title: 'Zgłoszenie zmiany danych',
+  html: `
+    <p>Czy na pewno chcesz zgłosić tę zmianę danych?</p>
+    <p>Dane zostaną zmienione dopiero po uzyskaniu
+    wymaganych zatwierdzeń.</p>
+  `,
+};
 
-  errors: INCIDENT_ERROR_MESSAGES,
+const UPDATE_ROW_INVALID_PAYLOAD: NotificationMessage = {
+  title: 'Nie można zgłosić zmiany',
+  html: `
+    <p>Nie udało się przygotować zmiany do wysłania.
+    Wniosek nie został wysłany.</p>
+    <p>Odśwież dane tabeli i wprowadź zmianę ponownie.
+    Jeśli problem się powtarza,
+    skontaktuj się z administratorem.</p>
+  `,
+};
 
-  fallback: {
-    invalidRequest: INCIDENT_FALLBACK_MESSAGES.INVALID_REQUEST,
-    forbidden: INCIDENT_FALLBACK_MESSAGES.FORBIDDEN,
-    conflict: INCIDENT_FALLBACK_MESSAGES.CONFLICT,
-    unexpected: INCIDENT_FALLBACK_MESSAGES.UNEXPECTED,
+const UPDATE_ROW_SUCCESS_MESSAGES = {
+  CREATED: {
+    title: 'Wniosek o zmianę został utworzony',
+    html: `
+      <p>Wniosek o zmianę danych został pomyślnie utworzony.
+      Dane nie zostały jeszcze zmienione.</p>
+      <p>Zmiana zostanie wprowadzona po uzyskaniu
+      wymaganych zatwierdzeń.
+      Status możesz sprawdzić w szczegółach wniosku.</p>
+    `,
   },
-} satisfies NotificationDialogConfig<IncidentDecisionKind>;
 
-export { INCIDENT_DIALOG_CONFIG };
+  ALREADY_CREATED: {
+    title: 'Wniosek o zmianę już istnieje',
+    html: `
+      <p>Ta zmiana została już wcześniej zgłoszona.
+      Nie utworzono kolejnego wniosku.</p>
+      <p>Sprawdź status istniejącego wniosku,
+      aby ustalić dalszy przebieg jego rozpatrywania.</p>
+    `,
+  },
+} satisfies Record<string, NotificationMessage>;
+
+const UPDATE_ROW_ERROR_MESSAGES: Readonly<
+  Partial<Record<string, NotificationMessage>>
+> = {
+  GOV_INTENT_INVALID: {
+    title: 'Dane wymagają poprawy',
+    html: `
+      <p>Niektóre dane lub wybrany rodzaj zmiany
+      nie spełniają wymagań.
+      Wniosek nie został utworzony.</p>
+      <p>Sprawdź wprowadzone wartości, w tym liczby i daty.
+      Jeśli dane są poprawne lub edycja tej tabeli jest niedostępna,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_QUORUM_INFEASIBLE: {
+    title: 'Brakuje osób uprawnionych do zatwierdzenia',
+    html: `
+      <p>Nie ma wystarczającej liczby uprawnionych osób,
+      aby zatwierdzić tę zmianę.
+      Wniosek nie został utworzony.</p>
+      <p>Skontaktuj się z administratorem,
+      aby ustalić dalszy sposób postępowania.</p>
+    `,
+  },
+
+  GOV_TARGET_NOT_REGISTERED: {
+    title: 'Ten rodzaj zmiany jest niedostępny',
+    html: `
+      <p>System nie może obecnie obsłużyć tego rodzaju zmiany.
+      Wniosek nie został utworzony.</p>
+      <p>Skontaktuj się z administratorem
+      i wskaż tabelę, której dotyczy problem.</p>
+    `,
+  },
+
+  GOV_RESOURCE_CONFLICT: {
+    title: 'Nie można zgłosić zmiany',
+    html: `
+      <p>Zmiana koliduje z innym otwartym wnioskiem
+      lub zasadami rozpatrywania zmian.
+      Nowy wniosek nie został utworzony.</p>
+      <p>Odśwież dane i sprawdź istniejące wnioski.
+      Jeśli problem nadal występuje,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+};
+
+const UPDATE_ROW_FALLBACK_MESSAGES = {
+  invalidRequest: {
+    title: 'Nie można zgłosić zmiany',
+    html: `
+      <p>Nie udało się przyjąć wniosku o zmianę danych.</p>
+      <p>Sprawdź wprowadzone wartości.
+      Jeśli są poprawne, odśwież dane i spróbuj ponownie.
+      Jeśli problem się powtarza,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  forbidden: {
+    title: 'Brak uprawnień do zgłoszenia zmiany',
+    html: `
+      <p>Nie masz uprawnień do wykonania tej czynności.
+      Wniosek nie został utworzony.</p>
+      <p>Jeśli potrzebujesz możliwości zmiany tych danych,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  conflict: {
+    title: 'Nie można zgłosić zmiany',
+    html: `
+      <p>Zmiana koliduje z innym otwartym wnioskiem
+      lub zasadami rozpatrywania zmian.</p>
+      <p>Odśwież dane i sprawdź istniejące wnioski.
+      Jeśli problem nadal występuje,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  unexpected: {
+    title: 'Nie udało się potwierdzić zgłoszenia zmiany',
+    html: `
+      <p>Wystąpił nieoczekiwany problem.
+      Nie udało się potwierdzić,
+      czy wniosek o zmianę danych został utworzony.</p>
+      <p>Odśwież dane i sprawdź listę wniosków
+      przed ponownym wysłaniem zmiany.
+      Jeśli problem nadal występuje,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+} satisfies Record<string, NotificationMessage>;
+
+const UPDATE_ROW_HTTP_ERROR_MESSAGES = {
+  AUTHENTICATION_REQUIRED: {
+    title: 'Nie można potwierdzić zalogowania',
+    html: `
+      <p>System nie może potwierdzić Twojego zalogowania.
+      Wniosek nie został utworzony.</p>
+      <p>Odśwież stronę.
+      Jeśli pojawi się ekran logowania, zaloguj się ponownie.
+      Jeśli problem nadal występuje,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  RATE_LIMITED: {
+    title: 'Wysyłanie zmian jest chwilowo ograniczone',
+    html: `
+      <p>System chwilowo ograniczył przyjmowanie zgłoszeń.
+      Ten wniosek nie został przyjęty.</p>
+      <p>Odczekaj chwilę przed kolejną próbą.
+      Jeśli problem się powtarza,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  SERVER_ERROR: {
+    title: 'Nie udało się potwierdzić zgłoszenia zmiany',
+    html: `
+      <p>Podczas obsługi zgłoszenia wystąpił problem
+      po stronie systemu.</p>
+      <p>Sprawdź listę wniosków przed ponownym wysłaniem zmiany.
+      Jeśli nie możesz potwierdzić jej zgłoszenia,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  SERVICE_UNAVAILABLE: {
+    title: 'Usługa jest chwilowo niedostępna',
+    html: `
+      <p>System nie może obecnie obsłużyć zgłoszenia zmiany.</p>
+      <p>Spróbuj ponownie później.
+      Przed ponownym wysłaniem sprawdź,
+      czy wniosek nie został już utworzony.
+      Jeśli problem nadal występuje,
+      skontaktuj się z administratorem.</p>
+    `,
+  },
+} satisfies Record<string, NotificationMessage>;
+
+const UPDATE_ROW_DIALOG_CONFIG = {
+  invalidPayload: UPDATE_ROW_INVALID_PAYLOAD,
+
+  confirmation: {
+    UPDATE: UPDATE_ROW_CONFIRMATION,
+  },
+
+  errors: UPDATE_ROW_ERROR_MESSAGES,
+
+  fallback: UPDATE_ROW_FALLBACK_MESSAGES,
+} satisfies NotificationDialogConfig<'UPDATE'>;
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatValue(value: RowEditValue): string {
+  return value === null ? 'Brak wartości' : String(value);
+}
+
+function createUpdateRowConfirmation(
+  data: UpdateRowConfirmationData,
+): NotificationMessage {
+  const fieldsHtml = data.fields
+    .map(field => {
+      const oldValue = escapeHtml(formatValue(field.oldValue));
+
+      const newValue =
+        field.newValue === null
+          ? 'Wartość zostanie usunięta'
+          : escapeHtml(formatValue(field.newValue));
+
+      return `
+        <li>
+          <b>${escapeHtml(field.label)}</b><br>
+          Obecna wartość: <b>${oldValue}</b><br>
+          Proponowana wartość: <b>${newValue}</b>
+        </li>
+      `;
+    })
+    .join('');
+
+  return {
+    title: UPDATE_ROW_CONFIRMATION.title,
+    html: `
+      ${UPDATE_ROW_CONFIRMATION.html}
+      <p>
+        <b>${escapeHtml(data.recordIdLabel)}</b>:
+        ${escapeHtml(data.recordId)}
+      </p>
+      <ul>${fieldsHtml}</ul>
+    `,
+  };
+}
+
+export type { UpdateRowConfirmationData };
+
+export {
+  UPDATE_ROW_DIALOG_CONFIG,
+  UPDATE_ROW_SUCCESS_MESSAGES,
+  UPDATE_ROW_HTTP_ERROR_MESSAGES,
+  createUpdateRowConfirmation,
+};
+
+
+
+
+
+
+
+
 
 
 
@@ -160,27 +323,238 @@ export { INCIDENT_DIALOG_CONFIG };
 
 import { Injectable } from '@angular/core';
 
-import type { IncidentDecisionKind } from '@entities/governance';
-
-import { NotificationDialogBase } from '@shared/notifications';
+import type { UiError } from '@shared/error';
 
 import {
-  INCIDENT_DIALOG_CONFIG,
-  INCIDENT_SUCCESS_MESSAGES,
-} from './incident-decision-notifications.model';
+  NotificationDialogBase,
+  type NotificationMessage,
+} from '@shared/notifications';
 
-@Injectable()
-export class IncidentDecisionDialogService
-  extends NotificationDialogBase<IncidentDecisionKind> {
+import {
+  UPDATE_ROW_DIALOG_CONFIG,
+  UPDATE_ROW_HTTP_ERROR_MESSAGES,
+  UPDATE_ROW_SUCCESS_MESSAGES,
+  createUpdateRowConfirmation,
+  type UpdateRowConfirmationData,
+} from './update-row.notifications';
+
+@Injectable({ providedIn: 'root' })
+export class UpdateRowDialogService
+  extends NotificationDialogBase<'UPDATE'> {
 
   constructor() {
-    super(INCIDENT_DIALOG_CONFIG);
+    super(UPDATE_ROW_DIALOG_CONFIG);
   }
 
-  openSuccess(decisionKind: IncidentDecisionKind): void {
-    this.openAlert(
-      'success',
-      INCIDENT_SUCCESS_MESSAGES[decisionKind],
+  openUpdateConfirmation(
+    data: UpdateRowConfirmationData,
+    onAccept: () => void,
+    onReject: () => void,
+  ): void {
+    this.openConfirmationMessage(
+      createUpdateRowConfirmation(data),
+      onAccept,
+      onReject,
     );
   }
+
+  openSuccess(created: boolean): void {
+    this.openAlert(
+      'success',
+      created
+        ? UPDATE_ROW_SUCCESS_MESSAGES.CREATED
+        : UPDATE_ROW_SUCCESS_MESSAGES.ALREADY_CREATED,
+    );
+  }
+
+  protected override getFallbackErrorMessage(
+    errorCode: UiError['errorCode'],
+  ): NotificationMessage {
+    switch (errorCode) {
+      case 401:
+        return UPDATE_ROW_HTTP_ERROR_MESSAGES.AUTHENTICATION_REQUIRED;
+
+      case 429:
+        return UPDATE_ROW_HTTP_ERROR_MESSAGES.RATE_LIMITED;
+
+      case 500:
+        return UPDATE_ROW_HTTP_ERROR_MESSAGES.SERVER_ERROR;
+
+      case 503:
+        return UPDATE_ROW_HTTP_ERROR_MESSAGES.SERVICE_UNAVAILABLE;
+
+      default:
+        return super.getFallbackErrorMessage(errorCode);
+    }
+  }
 }
+
+
+
+
+
+
+
+import { inject, Injectable } from '@angular/core';
+import { finalize } from 'rxjs';
+
+import {
+  RowEditCommandsApi,
+  type RowEditRequest,
+  type RowEditRequestPayload,
+  type RowEditTarget,
+} from '@entities/row-edit';
+
+import { MtLoaderService } from '@citi-icg-172888/ng-icgds';
+
+import type {
+  ChangedFields,
+  UpdateRowConfig,
+  UpdateRowPayload,
+} from './model/update-row.model';
+
+import {
+  UpdateRowDialogService,
+} from './model/update-row-dialog.service';
+
+import {
+  createNewValuesToSubmit,
+  getChangedFields,
+} from './model/update-row.utils';
+
+@Injectable({ providedIn: 'root' })
+export class UpdateRowFeature {
+  private readonly rowEditApiService = inject(RowEditCommandsApi);
+  private readonly loaderService = inject(MtLoaderService);
+  private readonly dialogService = inject(UpdateRowDialogService);
+
+  handle<T extends Record<string, unknown>>(
+    payload: UpdateRowPayload<T>,
+    config: UpdateRowConfig<T>,
+  ): void {
+    const changedFields = getChangedFields<T>(
+      payload.original,
+      payload.updated,
+      config.fieldNames,
+    );
+
+    if (changedFields.length === 0) {
+      return;
+    }
+
+    this.dialogService.openUpdateConfirmation(
+      {
+        recordIdLabel:
+          config.fieldNames[config.recordIdFieldName]?.label
+          ?? 'ID rekordu',
+
+        recordId: String(
+          payload.original[config.recordIdFieldName],
+        ),
+
+        fields: changedFields.map(field => ({
+          label:
+            config.fieldNames[field.name]?.label
+            ?? String(field.name),
+
+          oldValue: field.oldValue,
+          newValue: field.newValue,
+        })),
+      },
+      () => this.submit(payload, config, changedFields),
+      () => payload.onError(),
+    );
+  }
+
+  private submit<T extends Record<string, unknown>>(
+    payload: UpdateRowPayload<T>,
+    config: UpdateRowConfig<T>,
+    changedFields: ChangedFields<T>,
+  ): void {
+    const keyColumnName = payload.targetMetadata.keyColumns[0];
+    const versionColumnName = payload.targetMetadata.versionColumn;
+
+    if (!keyColumnName || !versionColumnName) {
+      this.dialogService.openInvalidPayload();
+      payload.onError();
+      return;
+    }
+
+    const keyColumn = keyColumnName.toLowerCase();
+    const versionColumn = versionColumnName.toLowerCase();
+
+    if (
+      !(keyColumn in payload.updated) ||
+      !(versionColumn in payload.updated)
+    ) {
+      this.dialogService.openInvalidPayload();
+      payload.onError();
+      return;
+    }
+
+    const pkValue = Number(payload.updated[keyColumn]);
+    const expectedVersion = Number(payload.updated[versionColumn]);
+
+    if (
+      !Number.isFinite(pkValue) ||
+      !Number.isFinite(expectedVersion)
+    ) {
+      this.dialogService.openInvalidPayload();
+      payload.onError();
+      return;
+    }
+
+    const newValues = createNewValuesToSubmit<T>(
+      payload.updated,
+      payload.targetMetadata,
+      changedFields,
+    );
+
+    this.loaderService.show();
+
+    this.sendUpdate(
+      {
+        newValues,
+        pkValue,
+        expectedVersion,
+      },
+      config.targetCode,
+    )
+      .pipe(
+        finalize(() => this.loaderService.hide()),
+      )
+      .subscribe({
+        next: ({ data }) => {
+          this.dialogService.openSuccess(data.created);
+          payload.onSuccess();
+        },
+
+        error: (error: unknown) => {
+          this.dialogService.openResponseError(error);
+          payload.onError();
+        },
+      });
+  }
+
+  private sendUpdate<T extends string = string>(
+    payload: RowEditRequestPayload<T>,
+    rowEditTarget: RowEditTarget,
+  ) {
+    const request: RowEditRequest = {
+      targetCode: rowEditTarget,
+      clientKey: crypto.randomUUID(),
+      keepOther: true,
+      rows: [
+        {
+          pkValue: String(payload.pkValue),
+          expectedVersion: payload.expectedVersion,
+          newValues: payload.newValues,
+        },
+      ],
+    };
+
+    return this.rowEditApiService.submitChanges(request);
+  }
+}
+
+export type { UpdateRowConfig };
