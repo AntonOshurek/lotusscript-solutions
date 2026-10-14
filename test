@@ -1,255 +1,178 @@
-openConfirmation(
-  action: TAction,
-  onAccept: () => void,
-): void {
-  this.openConfirmationMessage(
-    this.config.confirmation[action],
-    onAccept,
-  );
-}
-
-protected openConfirmationMessage(
-  message: NotificationMessage,
-  onAccept: () => void,
-  onReject?: () => void,
-): void {
-  this.modalService.open({
-    status: 'warning',
-    title: message.title,
-    html: message.html,
-    type: 'confirm',
-    afterUserAction: event => {
-      if (event.action === 'accept') {
-        onAccept();
-        return;
-      }
-
-      onReject?.();
-    },
-  });
-}
-
-
-
-
-
-
-
-import type { RowEditValue } from '@entities/row-edit';
-
 import type {
   NotificationDialogConfig,
   NotificationMessage,
 } from '@shared/notifications';
 
-type UpdateRowConfirmationData = {
-  readonly recordIdLabel: string;
-  readonly recordId: string;
-  readonly fields: ReadonlyArray<{
-    readonly label: string;
-    readonly oldValue: RowEditValue;
-    readonly newValue: RowEditValue;
-  }>;
+type AttributeChangeAction = 'SET' | 'CLEAR';
+
+type AttributeNotificationData = {
+  readonly attributeName: string;
+  readonly parentName: string;
 };
 
-const UPDATE_ROW_CONFIRMATION: NotificationMessage = {
-  title: 'Zgłoszenie zmiany danych',
-  html: `
-    <p>Czy na pewno chcesz zgłosić tę zmianę danych?</p>
-    <p>Dane zostaną zmienione dopiero po uzyskaniu
-    wymaganych zatwierdzeń.</p>
-  `,
+type AttributeConfirmationData = AttributeNotificationData & {
+  readonly currentValue: unknown;
 };
 
-const UPDATE_ROW_INVALID_PAYLOAD: NotificationMessage = {
-  title: 'Nie można zgłosić zmiany',
+type SetAttributeConfirmationData = AttributeConfirmationData & {
+  readonly newValue: string;
+};
+
+type AttributeSuccessData = AttributeNotificationData & {
+  readonly created: boolean;
+};
+
+const ATTRIBUTE_CONFIRMATION_MESSAGES = {
+  SET: {
+    title: 'Zmiana wartości atrybutu',
+    html: `
+      <p>Czy na pewno chcesz zgłosić zmianę wartości atrybutu?</p>
+      <p>Zmiana zostanie wprowadzona po zatwierdzeniu wniosku.</p>
+    `,
+  },
+
+  CLEAR: {
+    title: 'Usunięcie wartości atrybutu',
+    html: `
+      <p>Czy na pewno chcesz zgłosić usunięcie wartości atrybutu?</p>
+      <p>Wartość zostanie usunięta po zatwierdzeniu wniosku.
+      Sam atrybut nie zostanie usunięty.</p>
+    `,
+  },
+} satisfies Record<AttributeChangeAction, NotificationMessage>;
+
+const ATTRIBUTE_INVALID_PAYLOAD_MESSAGE: NotificationMessage = {
+  title: 'Nie można zgłosić zmiany atrybutu',
   html: `
     <p>Nie udało się przygotować zmiany do wysłania.
     Wniosek nie został wysłany.</p>
-    <p>Odśwież dane tabeli i wprowadź zmianę ponownie.
+    <p>Upewnij się, że edytujesz pole „Wartość atrybutu”.
+    Odśwież dane i spróbuj ponownie.</p>
+    <p>Jeśli problem się powtarza,
+    skontaktuj się z administratorem.</p>
+  `,
+};
+
+const ATTRIBUTE_INVALID_REQUEST_MESSAGE: NotificationMessage = {
+  title: 'Nie można zgłosić zmiany atrybutu',
+  html: `
+    <p>Wprowadzone dane są nieprawidłowe
+    lub wybrana zmiana nie jest dostępna dla tego elementu.
+    Wniosek nie został utworzony.</p>
+    <p>Sprawdź wpisaną wartość i odśwież dane.
+    Jeśli dane są poprawne, a problem nadal występuje,
+    skontaktuj się z administratorem.</p>
+  `,
+};
+
+const ATTRIBUTE_AUTHENTICATION_MESSAGE: NotificationMessage = {
+  title: 'Nie można potwierdzić zalogowania',
+  html: `
+    <p>System nie może potwierdzić Twojego zalogowania.
+    Wniosek nie został utworzony.</p>
+    <p>Odśwież stronę.
+    Jeśli pojawi się ekran logowania, zaloguj się ponownie.
+    Jeśli problem nadal występuje,
+    skontaktuj się z administratorem.</p>
+  `,
+};
+
+const ATTRIBUTE_FORBIDDEN_MESSAGE: NotificationMessage = {
+  title: 'Brak uprawnień do zmiany atrybutu',
+  html: `
+    <p>Nie masz uprawnień do wykonania tej czynności.
+    Wniosek nie został utworzony.</p>
+    <p>Jeśli potrzebujesz możliwości zmiany tego atrybutu,
+    skontaktuj się z administratorem.</p>
+  `,
+};
+
+const ATTRIBUTE_CONFLICT_MESSAGE: NotificationMessage = {
+  title: 'Nie można zgłosić zmiany atrybutu',
+  html: `
+    <p>Zmiana koliduje z innym otwartym wnioskiem
+    lub zasadami zatwierdzania zmian.</p>
+    <p>Odśwież dane i sprawdź istniejące wnioski.
+    Jeśli problem nadal występuje,
+    skontaktuj się z administratorem.</p>
+  `,
+};
+
+const ATTRIBUTE_RATE_LIMITED_MESSAGE: NotificationMessage = {
+  title: 'Wysyłanie zmian jest chwilowo ograniczone',
+  html: `
+    <p>System chwilowo ograniczył przyjmowanie zgłoszeń.
+    Ten wniosek nie został przyjęty.</p>
+    <p>Odczekaj chwilę przed kolejną próbą.
     Jeśli problem się powtarza,
     skontaktuj się z administratorem.</p>
   `,
 };
 
-const UPDATE_ROW_SUCCESS_MESSAGES = {
-  CREATED: {
-    title: 'Wniosek o zmianę został utworzony',
-    html: `
-      <p>Wniosek o zmianę danych został pomyślnie utworzony.
-      Dane nie zostały jeszcze zmienione.</p>
-      <p>Zmiana zostanie wprowadzona po uzyskaniu
-      wymaganych zatwierdzeń.
-      Status możesz sprawdzić w szczegółach wniosku.</p>
-    `,
-  },
-
-  ALREADY_CREATED: {
-    title: 'Wniosek o zmianę już istnieje',
-    html: `
-      <p>Ta zmiana została już wcześniej zgłoszona.
-      Nie utworzono kolejnego wniosku.</p>
-      <p>Sprawdź status istniejącego wniosku,
-      aby ustalić dalszy przebieg jego rozpatrywania.</p>
-    `,
-  },
-} satisfies Record<string, NotificationMessage>;
-
-const UPDATE_ROW_ERROR_MESSAGES: Readonly<
-  Partial<Record<string, NotificationMessage>>
-> = {
-  GOV_INTENT_INVALID: {
-    title: 'Dane wymagają poprawy',
-    html: `
-      <p>Niektóre dane lub wybrany rodzaj zmiany
-      nie spełniają wymagań.
-      Wniosek nie został utworzony.</p>
-      <p>Sprawdź wprowadzone wartości, w tym liczby i daty.
-      Jeśli dane są poprawne lub edycja tej tabeli jest niedostępna,
-      skontaktuj się z administratorem.</p>
-    `,
-  },
-
-  GOV_QUORUM_INFEASIBLE: {
-    title: 'Brakuje osób uprawnionych do zatwierdzenia',
-    html: `
-      <p>Nie ma wystarczającej liczby uprawnionych osób,
-      aby zatwierdzić tę zmianę.
-      Wniosek nie został utworzony.</p>
-      <p>Skontaktuj się z administratorem,
-      aby ustalić dalszy sposób postępowania.</p>
-    `,
-  },
-
-  GOV_TARGET_NOT_REGISTERED: {
-    title: 'Ten rodzaj zmiany jest niedostępny',
-    html: `
-      <p>System nie może obecnie obsłużyć tego rodzaju zmiany.
-      Wniosek nie został utworzony.</p>
-      <p>Skontaktuj się z administratorem
-      i wskaż tabelę, której dotyczy problem.</p>
-    `,
-  },
-
-  GOV_RESOURCE_CONFLICT: {
-    title: 'Nie można zgłosić zmiany',
-    html: `
-      <p>Zmiana koliduje z innym otwartym wnioskiem
-      lub zasadami rozpatrywania zmian.
-      Nowy wniosek nie został utworzony.</p>
-      <p>Odśwież dane i sprawdź istniejące wnioski.
-      Jeśli problem nadal występuje,
-      skontaktuj się z administratorem.</p>
-    `,
-  },
+const ATTRIBUTE_SERVER_ERROR_MESSAGE: NotificationMessage = {
+  title: 'Nie udało się potwierdzić zgłoszenia zmiany',
+  html: `
+    <p>Podczas obsługi zgłoszenia wystąpił problem
+    po stronie systemu.</p>
+    <p>Sprawdź listę wniosków przed ponownym wysłaniem zmiany.
+    Jeśli nie możesz potwierdzić jej zgłoszenia,
+    skontaktuj się z administratorem.</p>
+  `,
 };
 
-const UPDATE_ROW_FALLBACK_MESSAGES = {
-  invalidRequest: {
-    title: 'Nie można zgłosić zmiany',
-    html: `
-      <p>Nie udało się przyjąć wniosku o zmianę danych.</p>
-      <p>Sprawdź wprowadzone wartości.
-      Jeśli są poprawne, odśwież dane i spróbuj ponownie.
-      Jeśli problem się powtarza,
-      skontaktuj się z administratorem.</p>
-    `,
+const ATTRIBUTE_SERVICE_UNAVAILABLE_MESSAGE: NotificationMessage = {
+  title: 'Usługa jest chwilowo niedostępna',
+  html: `
+    <p>System nie może obecnie obsłużyć zgłoszenia zmiany atrybutu.</p>
+    <p>Spróbuj ponownie później.
+    Przed ponownym wysłaniem sprawdź,
+    czy wniosek nie został już utworzony.</p>
+    <p>Jeśli problem nadal występuje,
+    skontaktuj się z administratorem.</p>
+  `,
+};
+
+const ATTRIBUTE_UNEXPECTED_ERROR_MESSAGE: NotificationMessage = {
+  title: 'Nie udało się potwierdzić zgłoszenia zmiany',
+  html: `
+    <p>Wystąpił nieoczekiwany problem.
+    Nie udało się potwierdzić,
+    czy wniosek dotyczący atrybutu został utworzony.</p>
+    <p>Odśwież dane i sprawdź listę wniosków
+    przed ponownym wysłaniem zmiany.
+    Jeśli problem nadal występuje,
+    skontaktuj się z administratorem.</p>
+  `,
+};
+
+const ATTRIBUTE_HTTP_ERROR_MESSAGES: Readonly<
+  Partial<Record<number, NotificationMessage>>
+> = {
+  400: ATTRIBUTE_INVALID_REQUEST_MESSAGE,
+  401: ATTRIBUTE_AUTHENTICATION_MESSAGE,
+  403: ATTRIBUTE_FORBIDDEN_MESSAGE,
+  409: ATTRIBUTE_CONFLICT_MESSAGE,
+  429: ATTRIBUTE_RATE_LIMITED_MESSAGE,
+  500: ATTRIBUTE_SERVER_ERROR_MESSAGE,
+  503: ATTRIBUTE_SERVICE_UNAVAILABLE_MESSAGE,
+};
+
+const ATTRIBUTE_CHANGE_DIALOG_CONFIG = {
+  invalidPayload: ATTRIBUTE_INVALID_PAYLOAD_MESSAGE,
+
+  confirmation: ATTRIBUTE_CONFIRMATION_MESSAGES,
+
+  errors: {
+    GOV_INTENT_INVALID: ATTRIBUTE_INVALID_REQUEST_MESSAGE,
   },
 
-  forbidden: {
-    title: 'Brak uprawnień do zgłoszenia zmiany',
-    html: `
-      <p>Nie masz uprawnień do wykonania tej czynności.
-      Wniosek nie został utworzony.</p>
-      <p>Jeśli potrzebujesz możliwości zmiany tych danych,
-      skontaktuj się z administratorem.</p>
-    `,
+  fallback: {
+    invalidRequest: ATTRIBUTE_INVALID_REQUEST_MESSAGE,
+    forbidden: ATTRIBUTE_FORBIDDEN_MESSAGE,
+    conflict: ATTRIBUTE_CONFLICT_MESSAGE,
+    unexpected: ATTRIBUTE_UNEXPECTED_ERROR_MESSAGE,
   },
-
-  conflict: {
-    title: 'Nie można zgłosić zmiany',
-    html: `
-      <p>Zmiana koliduje z innym otwartym wnioskiem
-      lub zasadami rozpatrywania zmian.</p>
-      <p>Odśwież dane i sprawdź istniejące wnioski.
-      Jeśli problem nadal występuje,
-      skontaktuj się z administratorem.</p>
-    `,
-  },
-
-  unexpected: {
-    title: 'Nie udało się potwierdzić zgłoszenia zmiany',
-    html: `
-      <p>Wystąpił nieoczekiwany problem.
-      Nie udało się potwierdzić,
-      czy wniosek o zmianę danych został utworzony.</p>
-      <p>Odśwież dane i sprawdź listę wniosków
-      przed ponownym wysłaniem zmiany.
-      Jeśli problem nadal występuje,
-      skontaktuj się z administratorem.</p>
-    `,
-  },
-} satisfies Record<string, NotificationMessage>;
-
-const UPDATE_ROW_HTTP_ERROR_MESSAGES = {
-  AUTHENTICATION_REQUIRED: {
-    title: 'Nie można potwierdzić zalogowania',
-    html: `
-      <p>System nie może potwierdzić Twojego zalogowania.
-      Wniosek nie został utworzony.</p>
-      <p>Odśwież stronę.
-      Jeśli pojawi się ekran logowania, zaloguj się ponownie.
-      Jeśli problem nadal występuje,
-      skontaktuj się z administratorem.</p>
-    `,
-  },
-
-  RATE_LIMITED: {
-    title: 'Wysyłanie zmian jest chwilowo ograniczone',
-    html: `
-      <p>System chwilowo ograniczył przyjmowanie zgłoszeń.
-      Ten wniosek nie został przyjęty.</p>
-      <p>Odczekaj chwilę przed kolejną próbą.
-      Jeśli problem się powtarza,
-      skontaktuj się z administratorem.</p>
-    `,
-  },
-
-  SERVER_ERROR: {
-    title: 'Nie udało się potwierdzić zgłoszenia zmiany',
-    html: `
-      <p>Podczas obsługi zgłoszenia wystąpił problem
-      po stronie systemu.</p>
-      <p>Sprawdź listę wniosków przed ponownym wysłaniem zmiany.
-      Jeśli nie możesz potwierdzić jej zgłoszenia,
-      skontaktuj się z administratorem.</p>
-    `,
-  },
-
-  SERVICE_UNAVAILABLE: {
-    title: 'Usługa jest chwilowo niedostępna',
-    html: `
-      <p>System nie może obecnie obsłużyć zgłoszenia zmiany.</p>
-      <p>Spróbuj ponownie później.
-      Przed ponownym wysłaniem sprawdź,
-      czy wniosek nie został już utworzony.
-      Jeśli problem nadal występuje,
-      skontaktuj się z administratorem.</p>
-    `,
-  },
-} satisfies Record<string, NotificationMessage>;
-
-const UPDATE_ROW_DIALOG_CONFIG = {
-  invalidPayload: UPDATE_ROW_INVALID_PAYLOAD,
-
-  confirmation: {
-    UPDATE: UPDATE_ROW_CONFIRMATION,
-  },
-
-  errors: UPDATE_ROW_ERROR_MESSAGES,
-
-  fallback: UPDATE_ROW_FALLBACK_MESSAGES,
-} satisfies NotificationDialogConfig<'UPDATE'>;
+} satisfies NotificationDialogConfig<AttributeChangeAction>;
 
 function escapeHtml(value: string): string {
   return value
@@ -260,52 +183,102 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function formatValue(value: RowEditValue): string {
-  return value === null ? 'Brak wartości' : String(value);
+function formatValue(value: unknown): string {
+  return value === null || value === undefined || value === ''
+    ? 'Brak wartości'
+    : String(value);
 }
 
-function createUpdateRowConfirmation(
-  data: UpdateRowConfirmationData,
+function createAttributeDetails(
+  data: AttributeNotificationData,
+): string {
+  return `
+    <p>
+      Atrybut: <b>${escapeHtml(data.attributeName)}</b><br>
+      Element: <b>${escapeHtml(data.parentName)}</b>
+    </p>
+  `;
+}
+
+function createSetAttributeConfirmation(
+  data: SetAttributeConfirmationData,
 ): NotificationMessage {
-  const fieldsHtml = data.fields
-    .map(field => {
-      const oldValue = escapeHtml(formatValue(field.oldValue));
-
-      const newValue =
-        field.newValue === null
-          ? 'Wartość zostanie usunięta'
-          : escapeHtml(formatValue(field.newValue));
-
-      return `
-        <li>
-          <b>${escapeHtml(field.label)}</b><br>
-          Obecna wartość: <b>${oldValue}</b><br>
-          Proponowana wartość: <b>${newValue}</b>
-        </li>
-      `;
-    })
-    .join('');
-
   return {
-    title: UPDATE_ROW_CONFIRMATION.title,
+    title: ATTRIBUTE_CONFIRMATION_MESSAGES.SET.title,
     html: `
-      ${UPDATE_ROW_CONFIRMATION.html}
+      ${ATTRIBUTE_CONFIRMATION_MESSAGES.SET.html}
+      ${createAttributeDetails(data)}
       <p>
-        <b>${escapeHtml(data.recordIdLabel)}</b>:
-        ${escapeHtml(data.recordId)}
+        Obecna wartość:
+        <b>${escapeHtml(formatValue(data.currentValue))}</b><br>
+        Proponowana wartość:
+        <b>${escapeHtml(formatValue(data.newValue))}</b>
       </p>
-      <ul>${fieldsHtml}</ul>
     `,
   };
 }
 
-export type { UpdateRowConfirmationData };
+function createClearAttributeConfirmation(
+  data: AttributeConfirmationData,
+): NotificationMessage {
+  return {
+    title: ATTRIBUTE_CONFIRMATION_MESSAGES.CLEAR.title,
+    html: `
+      ${ATTRIBUTE_CONFIRMATION_MESSAGES.CLEAR.html}
+      ${createAttributeDetails(data)}
+      <p>
+        Obecna wartość:
+        <b>${escapeHtml(formatValue(data.currentValue))}</b>
+      </p>
+    `,
+  };
+}
+
+function createAttributeSuccessMessage(
+  action: AttributeChangeAction,
+  data: AttributeSuccessData,
+): NotificationMessage {
+  if (!data.created) {
+    return {
+      title: 'Wniosek już istnieje',
+      html: `
+        <p>Ta czynność została już wcześniej zgłoszona.
+        Nie utworzono kolejnego wniosku.</p>
+        ${createAttributeDetails(data)}
+        <p>Sprawdź status istniejącego wniosku,
+        aby ustalić dalszy przebieg jego rozpatrywania.</p>
+      `,
+    };
+  }
+
+  const operationMessage =
+    action === 'SET'
+      ? 'Wniosek o zmianę wartości atrybutu został utworzony.'
+      : 'Wniosek o usunięcie wartości atrybutu został utworzony.';
+
+  return {
+    title: 'Wniosek został wysłany do zatwierdzenia',
+    html: `
+      <p>${operationMessage}</p>
+      ${createAttributeDetails(data)}
+      <p>Wartość atrybutu nie została jeszcze zmieniona.
+      Czynność zostanie wykonana po zatwierdzeniu wniosku.</p>
+      <p>Status możesz sprawdzić w szczegółach wniosku.</p>
+    `,
+  };
+}
+
+export type {
+  AttributeChangeAction,
+  AttributeSuccessData,
+};
 
 export {
-  UPDATE_ROW_DIALOG_CONFIG,
-  UPDATE_ROW_SUCCESS_MESSAGES,
-  UPDATE_ROW_HTTP_ERROR_MESSAGES,
-  createUpdateRowConfirmation,
+  ATTRIBUTE_CHANGE_DIALOG_CONFIG,
+  ATTRIBUTE_HTTP_ERROR_MESSAGES,
+  createSetAttributeConfirmation,
+  createClearAttributeConfirmation,
+  createAttributeSuccessMessage,
 };
 
 
@@ -313,15 +286,12 @@ export {
 
 
 
-
-
-
-
-
-
-
-
 import { Injectable } from '@angular/core';
+
+import type {
+  AttributeParentRow,
+  AttributeRow,
+} from '@entities/attribute';
 
 import type { UiError } from '@shared/error';
 
@@ -331,63 +301,87 @@ import {
 } from '@shared/notifications';
 
 import {
-  UPDATE_ROW_DIALOG_CONFIG,
-  UPDATE_ROW_HTTP_ERROR_MESSAGES,
-  UPDATE_ROW_SUCCESS_MESSAGES,
-  createUpdateRowConfirmation,
-  type UpdateRowConfirmationData,
-} from './update-row.notifications';
+  ATTRIBUTE_CHANGE_DIALOG_CONFIG,
+  ATTRIBUTE_HTTP_ERROR_MESSAGES,
+  createSetAttributeConfirmation,
+  createClearAttributeConfirmation,
+  createAttributeSuccessMessage,
+  type AttributeChangeAction,
+  type AttributeSuccessData,
+} from './attribute-change-notifications.model';
+
+type AttributeConfirmationParams = {
+  readonly parent: AttributeParentRow;
+  readonly attribute: AttributeRow;
+  readonly onAccept: () => void;
+};
+
+type SetAttributeConfirmationParams = AttributeConfirmationParams & {
+  readonly newValue: string;
+};
 
 @Injectable({ providedIn: 'root' })
-export class UpdateRowDialogService
-  extends NotificationDialogBase<'UPDATE'> {
+export class AttributeChangeDialogService
+  extends NotificationDialogBase<AttributeChangeAction> {
 
   constructor() {
-    super(UPDATE_ROW_DIALOG_CONFIG);
+    super(ATTRIBUTE_CHANGE_DIALOG_CONFIG);
   }
 
-  openUpdateConfirmation(
-    data: UpdateRowConfirmationData,
-    onAccept: () => void,
-    onReject: () => void,
-  ): void {
+  openSetConfirmation({
+    parent,
+    attribute,
+    newValue,
+    onAccept,
+  }: SetAttributeConfirmationParams): void {
     this.openConfirmationMessage(
-      createUpdateRowConfirmation(data),
+      createSetAttributeConfirmation({
+        attributeName: attribute.attributeName,
+        parentName: parent.parentName,
+        currentValue: attribute.value,
+        newValue,
+      }),
       onAccept,
-      onReject,
     );
   }
 
-  openSuccess(created: boolean): void {
+  openClearConfirmation({
+    parent,
+    attribute,
+    onAccept,
+  }: AttributeConfirmationParams): void {
+    this.openConfirmationMessage(
+      createClearAttributeConfirmation({
+        attributeName: attribute.attributeName,
+        parentName: parent.parentName,
+        currentValue: attribute.value,
+      }),
+      onAccept,
+    );
+  }
+
+  openSuccess(
+    action: AttributeChangeAction,
+    data: AttributeSuccessData,
+  ): void {
     this.openAlert(
       'success',
-      created
-        ? UPDATE_ROW_SUCCESS_MESSAGES.CREATED
-        : UPDATE_ROW_SUCCESS_MESSAGES.ALREADY_CREATED,
+      createAttributeSuccessMessage(action, data),
     );
   }
 
   protected override getFallbackErrorMessage(
     errorCode: UiError['errorCode'],
   ): NotificationMessage {
-    switch (errorCode) {
-      case 401:
-        return UPDATE_ROW_HTTP_ERROR_MESSAGES.AUTHENTICATION_REQUIRED;
-
-      case 429:
-        return UPDATE_ROW_HTTP_ERROR_MESSAGES.RATE_LIMITED;
-
-      case 500:
-        return UPDATE_ROW_HTTP_ERROR_MESSAGES.SERVER_ERROR;
-
-      case 503:
-        return UPDATE_ROW_HTTP_ERROR_MESSAGES.SERVICE_UNAVAILABLE;
-
-      default:
-        return super.getFallbackErrorMessage(errorCode);
-    }
+    return (
+      ATTRIBUTE_HTTP_ERROR_MESSAGES[errorCode]
+      ?? super.getFallbackErrorMessage(errorCode)
+    );
   }
 }
+
+
+
 
 
 
@@ -398,163 +392,142 @@ export class UpdateRowDialogService
 import { inject, Injectable } from '@angular/core';
 import { finalize } from 'rxjs';
 
+import type {
+  AttributeCellChangeEvent,
+} from '@entities/attribute';
+
 import {
-  RowEditCommandsApi,
-  type RowEditRequest,
-  type RowEditRequestPayload,
-  type RowEditTarget,
-} from '@entities/row-edit';
+  AbacAdminCommandsApi,
+  type ClearAttributePayload,
+  type SetAttributePayload,
+} from '@entities/abac-admin';
 
 import { MtLoaderService } from '@citi-icg-172888/ng-icgds';
 
-import type {
-  ChangedFields,
-  UpdateRowConfig,
-  UpdateRowPayload,
-} from './model/update-row.model';
+import {
+  AttributeChangeDialogService,
+} from './model/attribute-change-dialog.service';
 
 import {
-  UpdateRowDialogService,
-} from './model/update-row-dialog.service';
+  getAttributeChangeContext,
+} from './model/attribute-change-context';
 
-import {
-  createNewValuesToSubmit,
-  getChangedFields,
-} from './model/update-row.utils';
-
-@Injectable({ providedIn: 'root' })
-export class UpdateRowFeature {
-  private readonly rowEditApiService = inject(RowEditCommandsApi);
+@Injectable()
+export class ChangeAttributeFeature {
   private readonly loaderService = inject(MtLoaderService);
-  private readonly dialogService = inject(UpdateRowDialogService);
 
-  handle<T extends Record<string, unknown>>(
-    payload: UpdateRowPayload<T>,
-    config: UpdateRowConfig<T>,
-  ): void {
-    const changedFields = getChangedFields<T>(
-      payload.original,
-      payload.updated,
-      config.fieldNames,
-    );
+  private readonly attributeCommandsApi = inject(
+    AbacAdminCommandsApi,
+  );
 
-    if (changedFields.length === 0) {
+  private readonly dialogService = inject(
+    AttributeChangeDialogService,
+  );
+
+  change(event: AttributeCellChangeEvent): void {
+    const context = getAttributeChangeContext(event);
+
+    if (!context) {
+      this.dialogService.openInvalidPayload();
       return;
     }
 
-    this.dialogService.openUpdateConfirmation(
-      {
-        recordIdLabel:
-          config.fieldNames[config.recordIdFieldName]?.label
-          ?? 'ID rekordu',
+    const { parent, attribute, type, newValue } = context;
 
-        recordId: String(
-          payload.original[config.recordIdFieldName],
-        ),
+    if (type === 'clear') {
+      const payload: ClearAttributePayload = {
+        entityId: parent.id,
+        attributeName: attribute.attributeName,
+        clientKey: crypto.randomUUID(),
+      };
 
-        fields: changedFields.map(field => ({
-          label:
-            config.fieldNames[field.name]?.label
-            ?? String(field.name),
+      this.dialogService.openClearConfirmation({
+        parent,
+        attribute,
+        onAccept: () => {
+          this.clearAttribute(payload, parent.parentName);
+        },
+      });
 
-          oldValue: field.oldValue,
-          newValue: field.newValue,
-        })),
+      return;
+    }
+
+    const payload: SetAttributePayload = {
+      entityId: parent.id,
+      attributeName: attribute.attributeName,
+      value: newValue,
+      clientKey: crypto.randomUUID(),
+    };
+
+    this.dialogService.openSetConfirmation({
+      parent,
+      attribute,
+      newValue,
+      onAccept: () => {
+        this.setAttribute(payload, parent.parentName);
       },
-      () => this.submit(payload, config, changedFields),
-      () => payload.onError(),
-    );
+    });
   }
 
-  private submit<T extends Record<string, unknown>>(
-    payload: UpdateRowPayload<T>,
-    config: UpdateRowConfig<T>,
-    changedFields: ChangedFields<T>,
+  private setAttribute(
+    payload: SetAttributePayload,
+    parentName: string,
   ): void {
-    const keyColumnName = payload.targetMetadata.keyColumns[0];
-    const versionColumnName = payload.targetMetadata.versionColumn;
-
-    if (!keyColumnName || !versionColumnName) {
-      this.dialogService.openInvalidPayload();
-      payload.onError();
-      return;
-    }
-
-    const keyColumn = keyColumnName.toLowerCase();
-    const versionColumn = versionColumnName.toLowerCase();
-
-    if (
-      !(keyColumn in payload.updated) ||
-      !(versionColumn in payload.updated)
-    ) {
-      this.dialogService.openInvalidPayload();
-      payload.onError();
-      return;
-    }
-
-    const pkValue = Number(payload.updated[keyColumn]);
-    const expectedVersion = Number(payload.updated[versionColumn]);
-
-    if (
-      !Number.isFinite(pkValue) ||
-      !Number.isFinite(expectedVersion)
-    ) {
-      this.dialogService.openInvalidPayload();
-      payload.onError();
-      return;
-    }
-
-    const newValues = createNewValuesToSubmit<T>(
-      payload.updated,
-      payload.targetMetadata,
-      changedFields,
-    );
-
     this.loaderService.show();
 
-    this.sendUpdate(
-      {
-        newValues,
-        pkValue,
-        expectedVersion,
-      },
-      config.targetCode,
-    )
+    this.attributeCommandsApi
+      .setAttribute(payload)
       .pipe(
         finalize(() => this.loaderService.hide()),
       )
       .subscribe({
         next: ({ data }) => {
-          this.dialogService.openSuccess(data.created);
-          payload.onSuccess();
+          this.dialogService.openSuccess('SET', {
+            attributeName: payload.attributeName,
+            parentName,
+            created: data.created,
+          });
         },
 
         error: (error: unknown) => {
           this.dialogService.openResponseError(error);
-          payload.onError();
         },
       });
   }
 
-  private sendUpdate<T extends string = string>(
-    payload: RowEditRequestPayload<T>,
-    rowEditTarget: RowEditTarget,
-  ) {
-    const request: RowEditRequest = {
-      targetCode: rowEditTarget,
-      clientKey: crypto.randomUUID(),
-      keepOther: true,
-      rows: [
-        {
-          pkValue: String(payload.pkValue),
-          expectedVersion: payload.expectedVersion,
-          newValues: payload.newValues,
-        },
-      ],
-    };
+  private clearAttribute(
+    payload: ClearAttributePayload,
+    parentName: string,
+  ): void {
+    this.loaderService.show();
 
-    return this.rowEditApiService.submitChanges(request);
+    this.attributeCommandsApi
+      .clearAttribute(payload)
+      .pipe(
+        finalize(() => this.loaderService.hide()),
+      )
+      .subscribe({
+        next: ({ data }) => {
+          this.dialogService.openSuccess('CLEAR', {
+            attributeName: payload.attributeName,
+            parentName,
+            created: data.created,
+          });
+        },
+
+        error: (error: unknown) => {
+          this.dialogService.openResponseError(error);
+        },
+      });
   }
 }
 
-export type { UpdateRowConfig };
+
+
+
+
+
+
+
+
+
