@@ -1,39 +1,338 @@
-import {
-  retry,
-  throwError,
-  timer,
-  type MonoTypeOperatorFunction,
-} from 'rxjs';
+shared/error/model/ui-error.model.ts
 
-import { mapErrorToUiError } from '@shared/error';
-
-const CONFLICT_RETRY_COUNT = 2;
-const CONFLICT_RETRY_DELAY_MS = 500;
-
-export function retryOnConflict<T>(
-  detail: string,
-): MonoTypeOperatorFunction<T> {
-  return retry<T>({
-    count: CONFLICT_RETRY_COUNT,
-
-    delay: (error: unknown, retryCount: number) => {
-      const uiError = mapErrorToUiError(error);
-
-      const shouldRetry =
-        uiError.errorCode === 409 &&
-        uiError.backendError?.detail === detail;
-
-      if (!shouldRetry) {
-        return throwError(() => error);
-      }
-
-      return timer(
-        CONFLICT_RETRY_DELAY_MS * retryCount,
-      );
-    },
-  });
+interface ViolationsBackendError {
+  field: string;
+  message: string;
 }
 
+interface BackendError {
+  type?: string;
+  title?: string;
+  instance?: string;
+
+  status: number;
+  code: string;
+  message: string;
+  detail: string;
+  violations: ViolationsBackendError[];
+}
+
+interface UiError {
+  title: string;
+  message: string;
+
+  // Технические сведения. Не выводятся в обычном уведомлении.
+  details?: string[];
+
+  // HTTP-статус. Для ошибок вне HTTP сохраняем прежнее значение 0.
+  errorCode: number;
+
+  backendError?: BackendError;
+  requestId?: string;
+}
+
+export type {
+  BackendError,
+  UiError,
+  ViolationsBackendError,
+};
 
 
 
+
+shared/error/lib/api-error.mapper.ts
+
+
+import { HttpErrorResponse } from '@angular/common/http';
+
+import type {
+  BackendError,
+  UiError,
+  ViolationsBackendError,
+} from '../model/ui-error.model';
+
+const HTTP_ERROR_MESSAGES:
+  Readonly<Partial<Record<number, string>>> = {
+    0:
+      'Nie udało się połączyć z serwerem. ' +
+      'Sprawdź połączenie z siecią i spróbuj ponownie.',
+
+    400:
+      'Serwer odrzucił żądanie z powodu nieprawidłowych danych ' +
+      'lub parametrów. Sprawdź wprowadzone dane i spróbuj ponownie.',
+
+    401:
+      'Nie udało się potwierdzić Twojego zalogowania. ' +
+      'Odśwież stronę. Jeśli pojawi się ekran logowania, zaloguj się ponownie.',
+
+    403:
+      'Nie masz uprawnień do wykonania tej czynności ' +
+      'lub dostępu do wybranych danych.',
+
+    404:
+      'Nie znaleziono wskazanych danych. ' +
+      'Odśwież listę i sprawdź, czy wybrany element jest nadal dostępny.',
+
+    408:
+      'Przekroczono czas oczekiwania na obsługę żądania. ' +
+      'Spróbuj ponownie za chwilę.',
+
+    409:
+      'Żądanie koliduje z aktualnym stanem danych. ' +
+      'Odśwież dane i sprawdź dostępne działania.',
+
+    422:
+      'Przesłane dane nie spełniają wymagań. ' +
+      'Sprawdź wprowadzone wartości.',
+
+    429:
+      'Wysłano zbyt wiele żądań w krótkim czasie. ' +
+      'Odczekaj chwilę i spróbuj ponownie.',
+
+    500:
+      'Podczas obsługi żądania wystąpił problem po stronie systemu. ' +
+      'Jeśli problem się powtarza, skontaktuj się z administratorem.',
+
+    502:
+      'Wystąpił problem komunikacji między usługami. ' +
+      'Spróbuj ponownie za chwilę.',
+
+    503:
+      'Usługa jest chwilowo niedostępna. ' +
+      'Spróbuj ponownie później.',
+
+    504:
+      'Przekroczono czas oczekiwania na odpowiedź usługi. ' +
+      'Spróbuj ponownie za chwilę.',
+  };
+
+const UNEXPECTED_HTTP_ERROR_MESSAGE =
+  'Nie udało się obsłużyć żądania. ' +
+  'Jeśli problem się powtarza, skontaktuj się z administratorem.';
+
+const isRecord = (
+  value: unknown,
+): value is Record<string, unknown> => {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+};
+
+const readString = (value: unknown): string | undefined => {
+  return typeof value === 'string' ? value : undefined;
+};
+
+const parseViolations = (
+  value: unknown,
+): ViolationsBackendError[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (item): item is ViolationsBackendError =>
+      isRecord(item) &&
+      typeof item['field'] === 'string' &&
+      typeof item['message'] === 'string',
+  );
+};
+
+const parseBackendError = (
+  body: unknown,
+  httpStatus: number,
+): BackendError | undefined => {
+  let value: unknown = body;
+
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const code = readString(value['code']);
+  const detail = readString(value['detail']);
+  const title = readString(value['title']);
+  const message = readString(value['message']);
+
+  // Не считаем произвольный JSON стандартной ошибкой backend.
+  if (
+    code === undefined &&
+    detail === undefined &&
+    title === undefined &&
+    message === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    type: readString(value['type']),
+    title,
+    instance: readString(value['instance']),
+
+    status:
+      typeof value['status'] === 'number' &&
+      Number.isFinite(value['status'])
+        ? value['status']
+        : httpStatus,
+
+    code: code ?? '',
+    detail: detail ?? '',
+    message: message ?? '',
+    violations: parseViolations(value['violations']),
+  };
+};
+
+const parseApiErrorToUi = (
+  error: HttpErrorResponse,
+  title: string,
+): UiError => {
+  const backendError = parseBackendError(
+    error.error,
+    error.status,
+  );
+
+  const requestId =
+    error.headers.get('X-Request-Id')?.trim() ||
+    error.headers.get('X-Trace-Id')?.trim() ||
+    undefined;
+
+  const message =
+    error.status >= 200 && error.status < 300
+      ? 'Serwer zwrócił odpowiedź, której nie udało się odczytać. ' +
+        'Odśwież dane. Jeśli problem się powtarza, ' +
+        'skontaktuj się z administratorem.'
+      : HTTP_ERROR_MESSAGES[error.status] ??
+        UNEXPECTED_HTTP_ERROR_MESSAGE;
+
+  return {
+    title,
+    message,
+    errorCode: error.status,
+    backendError,
+    requestId,
+  };
+};
+
+export { parseApiErrorToUi };
+
+
+
+
+
+shared/error/lib/errorToUi.mapper.ts
+
+
+import { HttpErrorResponse } from '@angular/common/http';
+import { ZodError } from 'zod';
+
+import type { UiError } from '../model/ui-error.model';
+
+import { parseApiErrorToUi } from './api-error.mapper';
+
+const DEFAULT_ERROR_TITLE =
+  'Nie udało się wykonać operacji';
+
+const UNEXPECTED_ERROR_MESSAGE =
+  'Wystąpił nieoczekiwany problem. ' +
+  'Jeśli problem się powtarza, skontaktuj się z administratorem.';
+
+const mapErrorToUiError = (
+  error: unknown,
+  fallbackTitle: string = DEFAULT_ERROR_TITLE,
+): UiError => {
+  if (error instanceof HttpErrorResponse) {
+    return parseApiErrorToUi(error, fallbackTitle);
+  }
+
+  if (error instanceof ZodError) {
+    return {
+      title: fallbackTitle,
+
+      message:
+        'Nie udało się przetworzyć danych, ' +
+        'ponieważ mają nieoczekiwany format. ' +
+        'Jeśli problem się powtarza, ' +
+        'skontaktuj się z administratorem.',
+
+      details: error.issues.map(issue => {
+        const path = issue.path.map(String).join('.') || '(root)';
+
+        return `Path: ${path}; Code: ${issue.code}`;
+      }),
+
+      errorCode: 0,
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      title: fallbackTitle,
+      message: UNEXPECTED_ERROR_MESSAGE,
+
+      details: [
+        `Name: ${error.name}`,
+        `Message: ${error.message}`,
+      ],
+
+      errorCode: 0,
+    };
+  }
+
+  return {
+    title: fallbackTitle,
+    message: UNEXPECTED_ERROR_MESSAGE,
+    details: [],
+    errorCode: 0,
+  };
+};
+
+const escapeHtml = (value: string): string => {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
+const generateToastErrorHtml = (
+  uiError: UiError,
+): string => {
+  const title = escapeHtml(uiError.title);
+  const message = escapeHtml(uiError.message);
+
+  const requestIdHtml = uiError.requestId
+    ? `
+      <p>
+        Identyfikator zgłoszenia:
+        <code>${escapeHtml(uiError.requestId)}</code>
+      </p>
+    `
+    : '';
+
+  return `
+    <div>
+      <p>
+        <i class="lmnicon lmnicon-alert-triangle lmn-text-color-warning"></i>
+        <strong>${title}</strong>
+      </p>
+
+      <p>${message}</p>
+
+      ${requestIdHtml}
+    </div>
+  `;
+};
+
+export {
+  mapErrorToUiError,
+  generateToastErrorHtml,
+};  
