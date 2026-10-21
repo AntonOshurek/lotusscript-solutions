@@ -1,533 +1,127 @@
-import type {
-  NotificationDialogConfig,
-  NotificationMessage,
-} from '@shared/notifications';
-
-type AttributeChangeAction = 'SET' | 'CLEAR';
-
-type AttributeNotificationData = {
-  readonly attributeName: string;
-  readonly parentName: string;
-};
-
-type AttributeConfirmationData = AttributeNotificationData & {
-  readonly currentValue: unknown;
-};
-
-type SetAttributeConfirmationData = AttributeConfirmationData & {
-  readonly newValue: string;
-};
-
-type AttributeSuccessData = AttributeNotificationData & {
-  readonly created: boolean;
-};
-
-const ATTRIBUTE_CONFIRMATION_MESSAGES = {
-  SET: {
-    title: 'Zmiana wartości atrybutu',
-    html: `
-      <p>Czy na pewno chcesz zgłosić zmianę wartości atrybutu?</p>
-      <p>Zmiana zostanie wprowadzona po zatwierdzeniu wniosku.</p>
-    `,
-  },
-
-  CLEAR: {
-    title: 'Usunięcie wartości atrybutu',
-    html: `
-      <p>Czy na pewno chcesz zgłosić usunięcie wartości atrybutu?</p>
-      <p>Wartość zostanie usunięta po zatwierdzeniu wniosku.
-      Sam atrybut nie zostanie usunięty.</p>
-    `,
-  },
-} satisfies Record<AttributeChangeAction, NotificationMessage>;
-
-const ATTRIBUTE_INVALID_PAYLOAD_MESSAGE: NotificationMessage = {
-  title: 'Nie można zgłosić zmiany atrybutu',
-  html: `
-    <p>Nie udało się przygotować zmiany do wysłania.
-    Wniosek nie został wysłany.</p>
-    <p>Upewnij się, że edytujesz pole „Wartość atrybutu”.
-    Odśwież dane i spróbuj ponownie.</p>
-    <p>Jeśli problem się powtarza,
-    skontaktuj się z administratorem.</p>
-  `,
-};
-
-const ATTRIBUTE_INVALID_REQUEST_MESSAGE: NotificationMessage = {
-  title: 'Nie można zgłosić zmiany atrybutu',
-  html: `
-    <p>Wprowadzone dane są nieprawidłowe
-    lub wybrana zmiana nie jest dostępna dla tego elementu.
-    Wniosek nie został utworzony.</p>
-    <p>Sprawdź wpisaną wartość i odśwież dane.
-    Jeśli dane są poprawne, a problem nadal występuje,
-    skontaktuj się z administratorem.</p>
-  `,
-};
-
-const ATTRIBUTE_AUTHENTICATION_MESSAGE: NotificationMessage = {
-  title: 'Nie można potwierdzić zalogowania',
-  html: `
-    <p>System nie może potwierdzić Twojego zalogowania.
-    Wniosek nie został utworzony.</p>
-    <p>Odśwież stronę.
-    Jeśli pojawi się ekran logowania, zaloguj się ponownie.
-    Jeśli problem nadal występuje,
-    skontaktuj się z administratorem.</p>
-  `,
-};
-
-const ATTRIBUTE_FORBIDDEN_MESSAGE: NotificationMessage = {
-  title: 'Brak uprawnień do zmiany atrybutu',
-  html: `
-    <p>Nie masz uprawnień do wykonania tej czynności.
-    Wniosek nie został utworzony.</p>
-    <p>Jeśli potrzebujesz możliwości zmiany tego atrybutu,
-    skontaktuj się z administratorem.</p>
-  `,
-};
-
-const ATTRIBUTE_CONFLICT_MESSAGE: NotificationMessage = {
-  title: 'Nie można zgłosić zmiany atrybutu',
-  html: `
-    <p>Zmiana koliduje z innym otwartym wnioskiem
-    lub zasadami zatwierdzania zmian.</p>
-    <p>Odśwież dane i sprawdź istniejące wnioski.
-    Jeśli problem nadal występuje,
-    skontaktuj się z administratorem.</p>
-  `,
-};
-
-const ATTRIBUTE_RATE_LIMITED_MESSAGE: NotificationMessage = {
-  title: 'Wysyłanie zmian jest chwilowo ograniczone',
-  html: `
-    <p>System chwilowo ograniczył przyjmowanie zgłoszeń.
-    Ten wniosek nie został przyjęty.</p>
-    <p>Odczekaj chwilę przed kolejną próbą.
-    Jeśli problem się powtarza,
-    skontaktuj się z administratorem.</p>
-  `,
-};
-
-const ATTRIBUTE_SERVER_ERROR_MESSAGE: NotificationMessage = {
-  title: 'Nie udało się potwierdzić zgłoszenia zmiany',
-  html: `
-    <p>Podczas obsługi zgłoszenia wystąpił problem
-    po stronie systemu.</p>
-    <p>Sprawdź listę wniosków przed ponownym wysłaniem zmiany.
-    Jeśli nie możesz potwierdzić jej zgłoszenia,
-    skontaktuj się z administratorem.</p>
-  `,
-};
-
-const ATTRIBUTE_SERVICE_UNAVAILABLE_MESSAGE: NotificationMessage = {
-  title: 'Usługa jest chwilowo niedostępna',
-  html: `
-    <p>System nie może obecnie obsłużyć zgłoszenia zmiany atrybutu.</p>
-    <p>Spróbuj ponownie później.
-    Przed ponownym wysłaniem sprawdź,
-    czy wniosek nie został już utworzony.</p>
-    <p>Jeśli problem nadal występuje,
-    skontaktuj się z administratorem.</p>
-  `,
-};
-
-const ATTRIBUTE_UNEXPECTED_ERROR_MESSAGE: NotificationMessage = {
-  title: 'Nie udało się potwierdzić zgłoszenia zmiany',
-  html: `
-    <p>Wystąpił nieoczekiwany problem.
-    Nie udało się potwierdzić,
-    czy wniosek dotyczący atrybutu został utworzony.</p>
-    <p>Odśwież dane i sprawdź listę wniosków
-    przed ponownym wysłaniem zmiany.
-    Jeśli problem nadal występuje,
-    skontaktuj się z administratorem.</p>
-  `,
-};
-
-const ATTRIBUTE_HTTP_ERROR_MESSAGES: Readonly<
-  Partial<Record<number, NotificationMessage>>
-> = {
-  400: ATTRIBUTE_INVALID_REQUEST_MESSAGE,
-  401: ATTRIBUTE_AUTHENTICATION_MESSAGE,
-  403: ATTRIBUTE_FORBIDDEN_MESSAGE,
-  409: ATTRIBUTE_CONFLICT_MESSAGE,
-  429: ATTRIBUTE_RATE_LIMITED_MESSAGE,
-  500: ATTRIBUTE_SERVER_ERROR_MESSAGE,
-  503: ATTRIBUTE_SERVICE_UNAVAILABLE_MESSAGE,
-};
-
-const ATTRIBUTE_CHANGE_DIALOG_CONFIG = {
-  invalidPayload: ATTRIBUTE_INVALID_PAYLOAD_MESSAGE,
-
-  confirmation: ATTRIBUTE_CONFIRMATION_MESSAGES,
-
-  errors: {
-    GOV_INTENT_INVALID: ATTRIBUTE_INVALID_REQUEST_MESSAGE,
-  },
-
-  fallback: {
-    invalidRequest: ATTRIBUTE_INVALID_REQUEST_MESSAGE,
-    forbidden: ATTRIBUTE_FORBIDDEN_MESSAGE,
-    conflict: ATTRIBUTE_CONFLICT_MESSAGE,
-    unexpected: ATTRIBUTE_UNEXPECTED_ERROR_MESSAGE,
-  },
-} satisfies NotificationDialogConfig<AttributeChangeAction>;
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function formatValue(value: unknown): string {
-  return value === null || value === undefined || value === ''
-    ? 'Brak wartości'
-    : String(value);
-}
-
-function createAttributeDetails(
-  data: AttributeNotificationData,
-): string {
-  return `
-    <p>
-      Atrybut: <b>${escapeHtml(data.attributeName)}</b><br>
-      Element: <b>${escapeHtml(data.parentName)}</b>
-    </p>
-  `;
-}
-
-function createSetAttributeConfirmation(
-  data: SetAttributeConfirmationData,
-): NotificationMessage {
-  return {
-    title: ATTRIBUTE_CONFIRMATION_MESSAGES.SET.title,
-    html: `
-      ${ATTRIBUTE_CONFIRMATION_MESSAGES.SET.html}
-      ${createAttributeDetails(data)}
-      <p>
-        Obecna wartość:
-        <b>${escapeHtml(formatValue(data.currentValue))}</b><br>
-        Proponowana wartość:
-        <b>${escapeHtml(formatValue(data.newValue))}</b>
-      </p>
-    `,
-  };
-}
-
-function createClearAttributeConfirmation(
-  data: AttributeConfirmationData,
-): NotificationMessage {
-  return {
-    title: ATTRIBUTE_CONFIRMATION_MESSAGES.CLEAR.title,
-    html: `
-      ${ATTRIBUTE_CONFIRMATION_MESSAGES.CLEAR.html}
-      ${createAttributeDetails(data)}
-      <p>
-        Obecna wartość:
-        <b>${escapeHtml(formatValue(data.currentValue))}</b>
-      </p>
-    `,
-  };
-}
-
-function createAttributeSuccessMessage(
-  action: AttributeChangeAction,
-  data: AttributeSuccessData,
-): NotificationMessage {
-  if (!data.created) {
-    return {
-      title: 'Wniosek już istnieje',
-      html: `
-        <p>Ta czynność została już wcześniej zgłoszona.
-        Nie utworzono kolejnego wniosku.</p>
-        ${createAttributeDetails(data)}
-        <p>Sprawdź status istniejącego wniosku,
-        aby ustalić dalszy przebieg jego rozpatrywania.</p>
-      `,
-    };
-  }
-
-  const operationMessage =
-    action === 'SET'
-      ? 'Wniosek o zmianę wartości atrybutu został utworzony.'
-      : 'Wniosek o usunięcie wartości atrybutu został utworzony.';
-
-  return {
-    title: 'Wniosek został wysłany do zatwierdzenia',
-    html: `
-      <p>${operationMessage}</p>
-      ${createAttributeDetails(data)}
-      <p>Wartość atrybutu nie została jeszcze zmieniona.
-      Czynność zostanie wykonana po zatwierdzeniu wniosku.</p>
-      <p>Status możesz sprawdzić w szczegółach wniosku.</p>
-    `,
-  };
-}
-
-export type {
-  AttributeChangeAction,
-  AttributeSuccessData,
-};
-
-export {
-  ATTRIBUTE_CHANGE_DIALOG_CONFIG,
-  ATTRIBUTE_HTTP_ERROR_MESSAGES,
-  createSetAttributeConfirmation,
-  createClearAttributeConfirmation,
-  createAttributeSuccessMessage,
-};
-
-
-
-
-
-
-import { Injectable } from '@angular/core';
-
-import type {
-  AttributeParentRow,
-  AttributeRow,
-} from '@entities/attribute';
-
-import type { UiError } from '@shared/error';
-
-import {
-  NotificationDialogBase,
-  type NotificationMessage,
-} from '@shared/notifications';
-
-import {
-  ATTRIBUTE_CHANGE_DIALOG_CONFIG,
-  ATTRIBUTE_HTTP_ERROR_MESSAGES,
-  createSetAttributeConfirmation,
-  createClearAttributeConfirmation,
-  createAttributeSuccessMessage,
-  type AttributeChangeAction,
-  type AttributeSuccessData,
-} from './attribute-change-notifications.model';
-
-type AttributeConfirmationParams = {
-  readonly parent: AttributeParentRow;
-  readonly attribute: AttributeRow;
-  readonly onAccept: () => void;
-};
-
-type SetAttributeConfirmationParams = AttributeConfirmationParams & {
-  readonly newValue: string;
-};
-
-@Injectable({ providedIn: 'root' })
-export class AttributeChangeDialogService
-  extends NotificationDialogBase<AttributeChangeAction> {
-
-  constructor() {
-    super(ATTRIBUTE_CHANGE_DIALOG_CONFIG);
-  }
-
-  openSetConfirmation({
-    parent,
-    attribute,
-    newValue,
-    onAccept,
-  }: SetAttributeConfirmationParams): void {
-    this.openConfirmationMessage(
-      createSetAttributeConfirmation({
-        attributeName: attribute.attributeName,
-        parentName: parent.parentName,
-        currentValue: attribute.value,
-        newValue,
-      }),
-      onAccept,
-    );
-  }
-
-  openClearConfirmation({
-    parent,
-    attribute,
-    onAccept,
-  }: AttributeConfirmationParams): void {
-    this.openConfirmationMessage(
-      createClearAttributeConfirmation({
-        attributeName: attribute.attributeName,
-        parentName: parent.parentName,
-        currentValue: attribute.value,
-      }),
-      onAccept,
-    );
-  }
-
-  openSuccess(
-    action: AttributeChangeAction,
-    data: AttributeSuccessData,
-  ): void {
-    this.openAlert(
-      'success',
-      createAttributeSuccessMessage(action, data),
-    );
-  }
-
-  protected override getFallbackErrorMessage(
-    errorCode: UiError['errorCode'],
-  ): NotificationMessage {
-    return (
-      ATTRIBUTE_HTTP_ERROR_MESSAGES[errorCode]
-      ?? super.getFallbackErrorMessage(errorCode)
-    );
-  }
-}
-
-
-
-
-
-
-
-
-
-
 import { inject, Injectable } from '@angular/core';
-import { finalize } from 'rxjs';
+
+import {
+  defer,
+  finalize,
+  retry,
+  throwError,
+  timer,
+} from 'rxjs';
+
+import {
+  GovernanceCommandsApi,
+  GovernanceRefreshEvent,
+} from '@entities/governance';
+
+import { mapErrorToUiError } from '@shared/error';
+
+import {
+  MtLoaderService,
+} from '@citi-icg-172888/ng-icgds';
+
+import {
+  CaseDecisionDialogService,
+} from './model/case-decision-dialog.service';
 
 import type {
-  AttributeCellChangeEvent,
-} from '@entities/attribute';
+  DecideProps,
+  MakeDecisionFeaturePayload,
+} from './model/case-decision.model';
 
-import {
-  AbacAdminCommandsApi,
-  type ClearAttributePayload,
-  type SetAttributePayload,
-} from '@entities/abac-admin';
-
-import { MtLoaderService } from '@citi-icg-172888/ng-icgds';
-
-import {
-  AttributeChangeDialogService,
-} from './model/attribute-change-dialog.service';
-
-import {
-  getAttributeChangeContext,
-} from './model/attribute-change-context';
+const RESOURCE_BUSY_RETRY_COUNT = 2;
+const RESOURCE_BUSY_RETRY_DELAY_MS = 500;
 
 @Injectable()
-export class ChangeAttributeFeature {
+export class CaseDecisionFeature {
   private readonly loaderService = inject(MtLoaderService);
 
-  private readonly attributeCommandsApi = inject(
-    AbacAdminCommandsApi,
-  );
+  private readonly governanceCommandsApi =
+    inject(GovernanceCommandsApi);
 
-  private readonly dialogService = inject(
-    AttributeChangeDialogService,
-  );
+  private readonly dialogService =
+    inject(CaseDecisionDialogService);
 
-  change(event: AttributeCellChangeEvent): void {
-    const context = getAttributeChangeContext(event);
+  private readonly governanceRefreshEvent =
+    inject(GovernanceRefreshEvent);
 
-    if (!context) {
+  public decide({
+    reason,
+    precomputedPayload,
+    decisionKind,
+  }: DecideProps): void {
+    if (!precomputedPayload) {
       this.dialogService.openInvalidPayload();
       return;
     }
 
-    const { parent, attribute, type, newValue } = context;
-
-    if (type === 'clear') {
-      const payload: ClearAttributePayload = {
-        entityId: parent.id,
-        attributeName: attribute.attributeName,
-        clientKey: crypto.randomUUID(),
-      };
-
-      this.dialogService.openClearConfirmation({
-        parent,
-        attribute,
-        onAccept: () => {
-          this.clearAttribute(payload, parent.parentName);
-        },
-      });
-
-      return;
-    }
-
-    const payload: SetAttributePayload = {
-      entityId: parent.id,
-      attributeName: attribute.attributeName,
-      value: newValue,
-      clientKey: crypto.randomUUID(),
+    const payload: MakeDecisionFeaturePayload = {
+      ...precomputedPayload,
+      kind: decisionKind,
+      reason,
     };
 
-    this.dialogService.openSetConfirmation({
-      parent,
-      attribute,
-      newValue,
-      onAccept: () => {
-        this.setAttribute(payload, parent.parentName);
-      },
-    });
+    this.dialogService.openConfirmation(
+      decisionKind,
+      () => this.sendDecision(payload),
+    );
   }
 
-  private setAttribute(
-    payload: SetAttributePayload,
-    parentName: string,
+  private sendDecision(
+    payload: MakeDecisionFeaturePayload,
   ): void {
     this.loaderService.show();
 
-    this.attributeCommandsApi
-      .setAttribute(payload)
+    defer(() =>
+      this.governanceCommandsApi.caseDecision(
+        payload,
+        payload.caseId,
+      ),
+    )
       .pipe(
-        finalize(() => this.loaderService.hide()),
+        retry({
+          count: RESOURCE_BUSY_RETRY_COUNT,
+
+          delay: (error: unknown, retryCount: number) => {
+            const uiError = mapErrorToUiError(error);
+
+            const isResourceBusy =
+              uiError.errorCode === 409 &&
+              uiError.backendError?.detail ===
+                'GOV_RESOURCE_BUSY';
+
+            if (!isResourceBusy) {
+              return throwError(() => error);
+            }
+
+            return timer(
+              RESOURCE_BUSY_RETRY_DELAY_MS * retryCount,
+            );
+          },
+        }),
+
+        finalize(() => {
+          this.loaderService.hide();
+        }),
       )
       .subscribe({
         next: ({ data }) => {
-          this.dialogService.openSuccess('SET', {
-            attributeName: payload.attributeName,
-            parentName,
-            created: data.created,
-          });
+          this.governanceRefreshEvent.refreshCase(
+            +payload.caseId,
+          );
+
+          this.dialogService.openSuccess(
+            payload.kind,
+            data,
+          );
         },
 
         error: (error: unknown) => {
-          this.dialogService.openResponseError(error);
-        },
-      });
-  }
+          this.governanceRefreshEvent.refreshCase(
+            +payload.caseId,
+          );
 
-  private clearAttribute(
-    payload: ClearAttributePayload,
-    parentName: string,
-  ): void {
-    this.loaderService.show();
-
-    this.attributeCommandsApi
-      .clearAttribute(payload)
-      .pipe(
-        finalize(() => this.loaderService.hide()),
-      )
-      .subscribe({
-        next: ({ data }) => {
-          this.dialogService.openSuccess('CLEAR', {
-            attributeName: payload.attributeName,
-            parentName,
-            created: data.created,
-          });
-        },
-
-        error: (error: unknown) => {
           this.dialogService.openResponseError(error);
         },
       });
   }
 }
-
-
-
-
-
-
-
-
-
-
