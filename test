@@ -15,64 +15,54 @@ import {
 
 import { mapErrorToUiError } from '@shared/error';
 
+import type {
+  CancelCaseFeaturePayload,
+} from './model/cancel-case.model';
+
+import {
+  CancelCaseDialogService,
+} from './model/cancel-case-dialog.service';
+
 import {
   MtLoaderService,
 } from '@citi-icg-172888/ng-icgds';
-
-import {
-  CaseDecisionDialogService,
-} from './model/case-decision-dialog.service';
-
-import type {
-  DecideProps,
-  MakeDecisionFeaturePayload,
-} from './model/case-decision.model';
 
 const RESOURCE_BUSY_RETRY_COUNT = 2;
 const RESOURCE_BUSY_RETRY_DELAY_MS = 500;
 
 @Injectable()
-export class CaseDecisionFeature {
+export class CancelCaseFeature {
   private readonly loaderService = inject(MtLoaderService);
 
   private readonly governanceCommandsApi =
     inject(GovernanceCommandsApi);
 
   private readonly dialogService =
-    inject(CaseDecisionDialogService);
+    inject(CancelCaseDialogService);
 
-  private readonly governanceRefreshEvent =
+  private readonly caseRefreshEvent =
     inject(GovernanceRefreshEvent);
 
-  public decide({
-    reason,
-    precomputedPayload,
-    decisionKind,
-  }: DecideProps): void {
-    if (!precomputedPayload) {
+  cancel(
+    payload: CancelCaseFeaturePayload | null | undefined,
+  ): void {
+    if (!payload) {
       this.dialogService.openInvalidPayload();
       return;
     }
 
-    const payload: MakeDecisionFeaturePayload = {
-      ...precomputedPayload,
-      kind: decisionKind,
-      reason,
-    };
-
-    this.dialogService.openConfirmation(
-      decisionKind,
-      () => this.sendDecision(payload),
-    );
+    this.dialogService.openConfirmation('CANCEL', () => {
+      this.sendCancelCase(payload);
+    });
   }
 
-  private sendDecision(
-    payload: MakeDecisionFeaturePayload,
+  private sendCancelCase(
+    payload: CancelCaseFeaturePayload,
   ): void {
     this.loaderService.show();
 
     defer(() =>
-      this.governanceCommandsApi.caseDecision(
+      this.governanceCommandsApi.caseCancel(
         payload,
         payload.caseId,
       ),
@@ -104,24 +94,95 @@ export class CaseDecisionFeature {
         }),
       )
       .subscribe({
-        next: ({ data }) => {
-          this.governanceRefreshEvent.refreshCase(
+        next: response => {
+          this.caseRefreshEvent.refreshCase(
             +payload.caseId,
           );
 
-          this.dialogService.openSuccess(
-            payload.kind,
-            data,
-          );
+          this.dialogService.openSuccess(response.data);
         },
 
         error: (error: unknown) => {
-          this.governanceRefreshEvent.refreshCase(
+          this.caseRefreshEvent.refreshCase(
             +payload.caseId,
           );
 
           this.dialogService.openResponseError(error);
         },
       });
+  }
+}
+
+
+
+
+
+
+
+
+NOT_FOUND: {
+  title: 'Nie znaleziono wniosku',
+  html: `
+    <p>Nie znaleziono wskazanego wniosku.
+      Anulowanie nie zostało wykonane.</p>
+    <p>Wróć do listy wniosków i odśwież ją.</p>
+  `,
+},
+
+
+
+
+
+
+
+
+import { Injectable } from '@angular/core';
+
+import type {
+  GovernanceCaseDecisionResponse,
+} from '@entities/governance';
+
+import {
+  NotificationDialogBase,
+} from '@shared/notifications';
+
+import {
+  CANCEL_CASE_DIALOG_CONFIG,
+  CANCEL_CASE_RESULT_MESSAGES,
+} from './cancel-case-notifications.model';
+
+@Injectable()
+export class CancelCaseDialogService
+  extends NotificationDialogBase<'CANCEL'> {
+  constructor() {
+    super(CANCEL_CASE_DIALOG_CONFIG);
+  }
+
+  openSuccess(
+    data: GovernanceCaseDecisionResponse,
+  ): void {
+    if (data.phase === 'INCIDENT') {
+      this.openAlert(
+        'warning',
+        CANCEL_CASE_RESULT_MESSAGES.INCIDENT,
+      );
+      return;
+    }
+
+    if (
+      data.phase === 'CLOSED' &&
+      data.outcome === 'CONFLICT_REFUSED'
+    ) {
+      this.openAlert(
+        'warning',
+        CANCEL_CASE_RESULT_MESSAGES.CONFLICT_REFUSED,
+      );
+      return;
+    }
+
+    this.openAlert(
+      'warning',
+      CANCEL_CASE_RESULT_MESSAGES.UNCONFIRMED,
+    );
   }
 }
