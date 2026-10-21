@@ -1,24 +1,34 @@
-const RESOURCE_BUSY_RETRY_COUNT = 2;
-const RESOURCE_BUSY_RETRY_DELAY_MS = 500;
+import {
+  retry,
+  throwError,
+  timer,
+  type MonoTypeOperatorFunction,
+} from 'rxjs';
 
-private retryResourceBusy<T>(): MonoTypeOperatorFunction<T> {
+import { mapErrorToUiError } from '@shared/error';
+
+const CONFLICT_RETRY_COUNT = 2;
+const CONFLICT_RETRY_DELAY_MS = 500;
+
+export function retryOnConflict<T>(
+  detail: string,
+): MonoTypeOperatorFunction<T> {
   return retry<T>({
-    count: RESOURCE_BUSY_RETRY_COUNT,
+    count: CONFLICT_RETRY_COUNT,
 
     delay: (error: unknown, retryCount: number) => {
       const uiError = mapErrorToUiError(error);
 
-      const isResourceBusy =
+      const shouldRetry =
         uiError.errorCode === 409 &&
-        uiError.backendError?.detail ===
-          'GOV_RESOURCE_BUSY';
+        uiError.backendError?.detail === detail;
 
-      if (!isResourceBusy) {
+      if (!shouldRetry) {
         return throwError(() => error);
       }
 
       return timer(
-        RESOURCE_BUSY_RETRY_DELAY_MS * retryCount,
+        CONFLICT_RETRY_DELAY_MS * retryCount,
       );
     },
   });
@@ -27,260 +37,3 @@ private retryResourceBusy<T>(): MonoTypeOperatorFunction<T> {
 
 
 
-
-
-
-
-private setAttribute(
-  payload: SetAttributePayload,
-  parentName: string,
-): void {
-  this.loaderService.show();
-
-  defer(() =>
-    this.attributeCommandsApi.setAttribute(payload),
-  )
-    .pipe(
-      this.retryResourceBusy(),
-
-      finalize(() => {
-        this.loaderService.hide();
-      }),
-    )
-    .subscribe({
-      next: ({ data }) => {
-        this.dialogService.openSuccess('SET', {
-          attributeName: payload.attributeName,
-          parentName,
-          created: data.created,
-        });
-      },
-
-      error: (error: unknown) => {
-        this.dialogService.openResponseError(error);
-      },
-    });
-}
-
-private clearAttribute(
-  payload: ClearAttributePayload,
-  parentName: string,
-): void {
-  this.loaderService.show();
-
-  defer(() =>
-    this.attributeCommandsApi.clearAttribute(payload),
-  )
-    .pipe(
-      this.retryResourceBusy(),
-
-      finalize(() => {
-        this.loaderService.hide();
-      }),
-    )
-    .subscribe({
-      next: ({ data }) => {
-        this.dialogService.openSuccess('CLEAR', {
-          attributeName: payload.attributeName,
-          parentName,
-          created: data.created,
-        });
-      },
-
-      error: (error: unknown) => {
-        this.dialogService.openResponseError(error);
-      },
-    });
-}
-
-
-
-
-
-
-
-
-
-
-const ATTRIBUTE_GOV_ERROR_MESSAGES = {
-  GOV_INTENT_INVALID: ATTRIBUTE_INVALID_REQUEST_MESSAGE,
-
-  GOV_NOT_ELIGIBLE: ATTRIBUTE_FORBIDDEN_MESSAGE,
-
-  GOV_QUORUM_INFEASIBLE: {
-    title: 'Brakuje osób uprawnionych do zatwierdzenia',
-    html: `
-      <p>Nie ma wystarczającej liczby uprawnionych osób,
-        aby zatwierdzić tę zmianę.
-        Wniosek nie został utworzony.</p>
-      <p>Skontaktuj się z administratorem,
-        aby ustalić dalszy sposób postępowania.</p>
-    `,
-  },
-
-  GOV_TARGET_NOT_REGISTERED: {
-    title: 'Ten rodzaj zmiany jest niedostępny',
-    html: `
-      <p>System nie może obecnie obsłużyć
-        tego rodzaju zmiany.
-        Wniosek nie został utworzony.</p>
-      <p>Skontaktuj się z administratorem.</p>
-    `,
-  },
-
-  GOV_RESOURCE_BUSY: {
-    title: 'Nie można teraz zgłosić zmiany atrybutu',
-    html: `
-      <p>Trwa inna operacja dotycząca powiązanej sprawy
-        lub danych. Zmiana nie została zgłoszona.</p>
-      <p>Odczekaj chwilę, sprawdź aktualne dane
-        i spróbuj ponownie.</p>
-    `,
-  },
-
-  GOV_RESOURCE_CONFLICT: {
-    title: 'Nie można zgłosić zmiany atrybutu',
-    html: `
-      <p>Zmiana koliduje z inną sprawą
-        lub aktualnym stanem powiązanych danych.
-        Wniosek nie został utworzony.</p>
-      <p>Odśwież dane i sprawdź istniejące wnioski.
-        Jeśli problem nadal występuje,
-        skontaktuj się z administratorem.</p>
-    `,
-  },
-
-  GOV_CLIENT_KEY_CONFLICT: {
-    title: 'Nie można zgłosić zmiany atrybutu',
-    html: `
-      <p>Identyfikator operacji został już użyty
-        dla innego żądania.
-        Nowy wniosek nie został utworzony.</p>
-      <p>Jeśli problem się powtarza,
-        skontaktuj się z administratorem.</p>
-    `,
-  },
-
-  GOV_EXECUTION_CONFLICT: {
-    title: 'Nie można zgłosić zmiany atrybutu',
-    html: `
-      <p>Serwer odmówił wykonania operacji.
-        Żądanie nie zostało wykonane.</p>
-      <p>Odśwież dane i sprawdź ich aktualny stan.
-        Jeśli problem nadal występuje,
-        skontaktuj się z administratorem.</p>
-    `,
-  },
-
-  GOV_SCOPE_FACTS_MISSING: {
-    title: 'Nie można zgłosić zmiany atrybutu',
-    html: `
-      <p>Wystąpił problem konfiguracji systemu.
-        Żądanie nie zostało wykonane.</p>
-      <p>Skontaktuj się z administratorem.</p>
-    `,
-  },
-
-  GOV_POLICY_VERSION_DRIFT: {
-    title: 'Nie można zgłosić zmiany atrybutu',
-    html: `
-      <p>Wystąpił problem z zapisanymi zasadami
-        rozpatrywania wniosku.
-        Żądanie nie zostało wykonane.</p>
-      <p>Skontaktuj się z administratorem.</p>
-    `,
-  },
-} satisfies Record<string, NotificationMessage>;
-
-
-
-
-
-
-
-
-
-
-
-errors: ATTRIBUTE_GOV_ERROR_MESSAGES,
-
-
-
-
-const ATTRIBUTE_CONFLICT_MESSAGE: NotificationMessage = {
-  title: 'Nie można zgłosić zmiany atrybutu',
-  html: `
-    <p>Żądanie nie mogło zostać wykonane
-      z powodu konfliktu z aktualnym stanem systemu.</p>
-    <p>Odśwież dane i sprawdź istniejące wnioski.
-      Jeśli problem nadal występuje,
-      skontaktuj się z administratorem.</p>
-  `,
-};
-
-
-
-
-
-
-const ATTRIBUTE_CONFIRMATION_MESSAGES = {
-  SET: {
-    title: 'Zmiana wartości atrybutu',
-    html: `
-      <p>Czy na pewno chcesz zgłosić
-        zmianę wartości atrybutu?</p>
-      <p>Zostanie utworzony wniosek do rozpatrzenia.
-        Samo zgłoszenie nie zmienia wartości atrybutu.</p>
-    `,
-  },
-
-  CLEAR: {
-    title: 'Usunięcie wartości atrybutu',
-    html: `
-      <p>Czy na pewno chcesz zgłosić
-        usunięcie wartości atrybutu?</p>
-      <p>Zostanie utworzony wniosek do rozpatrzenia.
-        Samo zgłoszenie nie usuwa wartości atrybutu.</p>
-      <p>Wniosek dotyczy usunięcia wartości,
-        a nie samego atrybutu.</p>
-    `,
-  },
-} satisfies Record<AttributeChangeAction, NotificationMessage>;
-
-
-
-
-
-const createAttributeSuccessMessage = (
-  action: AttributeChangeAction,
-  data: AttributeSuccessData,
-): NotificationMessage => {
-  if (!data.created) {
-    return {
-      title: 'Wniosek już istnieje',
-      html: `
-        <p>Ta czynność została już wcześniej zgłoszona.
-          Nie utworzono kolejnego wniosku.</p>
-        ${createAttributeDetails(data)}
-        <p>Sprawdź status istniejącego wniosku,
-          aby ustalić dalszy przebieg jego rozpatrywania.</p>
-      `,
-    };
-  }
-
-  const operationMessage =
-    action === 'SET'
-      ? 'Wniosek o zmianę wartości atrybutu został utworzony.'
-      : 'Wniosek o usunięcie wartości atrybutu został utworzony.';
-
-  return {
-    title: 'Wniosek został utworzony',
-    html: `
-      <p>${operationMessage}</p>
-      ${createAttributeDetails(data)}
-      <p>Wartość atrybutu nie została jeszcze zmieniona.</p>
-      <p>Status rozpatrywania i wynik realizacji zmiany
-        możesz sprawdzić w szczegółach wniosku.</p>
-    `,
-  };
-};
