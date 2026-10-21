@@ -1,172 +1,63 @@
-import { inject, Injectable } from '@angular/core';
-
-import {
-  defer,
-  finalize,
-  retry as retryRequest,
-  throwError,
-  timer,
-  type Observable,
-} from 'rxjs';
-
-import {
-  GovernanceCommandsApi,
-  GovernanceRefreshEvent,
-  type GovernanceIncidentDecisionResponse,
-} from '@entities/governance';
-
-import { mapErrorToUiError } from '@shared/error';
-
-import type {
-  IncidentDecideProps,
-} from './model/incident-decision.model';
-
-import {
-  IncidentDecisionDialogService,
-} from './model/incident-decision-dialog.service';
-
-import {
-  MtLoaderService,
-} from '@citi-icg-172888/ng-icgds';
-
-const RESOURCE_BUSY_RETRY_COUNT = 2;
-const RESOURCE_BUSY_RETRY_DELAY_MS = 500;
-
-@Injectable()
-export class IncidentDecisionFeature {
-  private readonly loaderService = inject(MtLoaderService);
-
-  private readonly governanceCommandsApi =
-    inject(GovernanceCommandsApi);
-
-  private readonly governanceRefreshEvent =
-    inject(GovernanceRefreshEvent);
-
-  private readonly incidentDecisionDialogService =
-    inject(IncidentDecisionDialogService);
-
-  public decide(props: IncidentDecideProps): void {
-    const { decisionPayload, decisionKind } = props;
-
-    if (!decisionPayload) {
-      this.incidentDecisionDialogService.openInvalidPayload();
-      return;
-    }
-
-    const reason = decisionPayload.reason?.trim();
-
-    if (!reason) {
-      this.incidentDecisionDialogService.openReasonRequired();
-      return;
-    }
-
-    const preparedProps: IncidentDecideProps = {
-      ...props,
-      decisionPayload: {
-        ...decisionPayload,
-        reason,
+private sendUpdate<T extends string = string>(
+  payload: RowEditRequestPayload<T>,
+  rowEditTarget: RowEditTarget,
+) {
+  const request: RowEditRequest = {
+    targetCode: rowEditTarget,
+    clientKey: crypto.randomUUID(),
+    keepOther: true,
+    rows: [
+      {
+        pkValue: String(payload.pkValue),
+        expectedVersion: payload.expectedVersion,
+        newValues: payload.newValues,
       },
-    };
+    ],
+  };
 
-    switch (decisionKind) {
-      case 'ABANDON':
-        this.incidentDecisionDialogService.abandonConfirmation(
-          () => this.abandon(preparedProps),
-        );
-        return;
+  return defer(() =>
+    this.rowEditApiService.submitChanges(request),
+  ).pipe(
+    retry({
+      count: 2,
 
-      case 'RETRY':
-        this.incidentDecisionDialogService.retryConfirmation(
-          () => this.retry(preparedProps),
-        );
-        return;
+      delay: (error: unknown, retryCount: number) => {
+        const uiError = mapErrorToUiError(error);
 
-      default: {
-        const unhandledKind: never = decisionKind;
+        const isResourceBusy =
+          uiError.errorCode === 409 &&
+          uiError.backendError?.detail ===
+            'GOV_RESOURCE_BUSY';
 
-        throw new Error(
-          `Unhandled incident decision kind: ${unhandledKind}`,
-        );
-      }
-    }
-  }
+        if (!isResourceBusy) {
+          return throwError(() => error);
+        }
 
-  private abandon(props: IncidentDecideProps): void {
-    this.executeDecision(
-      () =>
-        this.governanceCommandsApi.incidentAbandon(
-          props.decisionPayload,
-          String(props.incId),
-        ),
-      props,
-    );
-  }
-
-  private retry(props: IncidentDecideProps): void {
-    this.executeDecision(
-      () =>
-        this.governanceCommandsApi.incidentRetry(
-          props.decisionPayload,
-          String(props.incId),
-        ),
-      props,
-    );
-  }
-
-  private executeDecision(
-    createRequest: () => Observable<{
-      data: GovernanceIncidentDecisionResponse;
-    }>,
-    { incId, decisionKind }: IncidentDecideProps,
-  ): void {
-    this.loaderService.show();
-
-    defer(createRequest)
-      .pipe(
-        retryRequest({
-          count: RESOURCE_BUSY_RETRY_COUNT,
-
-          delay: (error: unknown, retryCount: number) => {
-            const uiError = mapErrorToUiError(error);
-
-            const isResourceBusy =
-              uiError.errorCode === 409 &&
-              uiError.backendError?.detail ===
-                'GOV_RESOURCE_BUSY';
-
-            if (!isResourceBusy) {
-              return throwError(() => error);
-            }
-
-            return timer(
-              RESOURCE_BUSY_RETRY_DELAY_MS * retryCount,
-            );
-          },
-        }),
-
-        finalize(() => {
-          this.loaderService.hide();
-        }),
-      )
-      .subscribe({
-        next: () => {
-          this.governanceRefreshEvent.refreshIncident(incId);
-
-          this.incidentDecisionDialogService.success(
-            decisionKind,
-          );
-        },
-
-        error: (error: unknown) => {
-          this.governanceRefreshEvent.refreshIncident(incId);
-
-          this.incidentDecisionDialogService.openResponseError(
-            error,
-          );
-        },
-      });
-  }
+        return timer(500 * retryCount);
+      },
+    }),
+  );
 }
+
+
+
+
+
+
+
+const UPDATE_ROW_VALIDATION_MESSAGES:
+  Readonly<Partial<Record<string, string>>> = {
+    ROWEDIT_VALUE_NOT_A_DATE:
+      'Nieprawidłowy format daty.',
+
+    ROWEDIT_VALUE_NUMBER_OUT_OF_RANGE:
+      'Liczba przekracza zakres lub dopuszczalną precyzję kolumny.',
+  };
+
+export { UPDATE_ROW_VALIDATION_MESSAGES };
+
+
+
 
 
 
@@ -176,46 +67,235 @@ export class IncidentDecisionFeature {
 
 import { Injectable } from '@angular/core';
 
-import type {
-  IncidentDecisionKind,
-} from '@entities/governance';
-
 import {
   NotificationDialogBase,
+  type NotificationMessage,
 } from '@shared/notifications';
 
 import {
-  INCIDENT_DIALOG_CONFIG,
-  INCIDENT_REASON_REQUIRED_MESSAGE,
-  INCIDENT_SUCCESS_MESSAGES,
-} from './incident-decision-notification.model';
+  mapErrorToUiError,
+  type UiError,
+} from '@shared/error';
 
-@Injectable()
-export class IncidentDecisionDialogService
-  extends NotificationDialogBase<IncidentDecisionKind> {
+import {
+  UPDATE_ROW_DIALOG_CONFIG,
+  UPDATE_ROW_HTTP_ERROR_MESSAGES,
+  UPDATE_ROW_SUCCESS_MESSAGES,
+  UPDATE_ROW_VALIDATION_MESSAGES,
+  createUpdateRowConfirmation,
+  type UpdateRowConfirmationData,
+} from './update-row.notifications';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class UpdateRowDialogService
+  extends NotificationDialogBase<'UPDATE'> {
   constructor() {
-    super(INCIDENT_DIALOG_CONFIG);
+    super(UPDATE_ROW_DIALOG_CONFIG);
   }
 
-  openReasonRequired(): void {
-    this.openAlert(
-      'danger',
-      INCIDENT_REASON_REQUIRED_MESSAGE,
+  openUpdateConfirmation(
+    data: UpdateRowConfirmationData,
+    onAccept: () => void,
+    onReject: () => void,
+  ): void {
+    this.openConfirmationMessage(
+      createUpdateRowConfirmation(data),
+      onAccept,
+      onReject,
     );
   }
 
-  abandonConfirmation(onAccept: () => void): void {
-    this.openConfirmation('ABANDON', onAccept);
-  }
-
-  retryConfirmation(onAccept: () => void): void {
-    this.openConfirmation('RETRY', onAccept);
-  }
-
-  success(decisionKind: IncidentDecisionKind): void {
+  openSuccess(created: boolean): void {
     this.openAlert(
       'success',
-      INCIDENT_SUCCESS_MESSAGES[decisionKind],
+      created
+        ? UPDATE_ROW_SUCCESS_MESSAGES.CREATED
+        : UPDATE_ROW_SUCCESS_MESSAGES.ALREADY_CREATED,
     );
   }
+
+  override openResponseError(error: unknown): void {
+    const uiError = mapErrorToUiError(error);
+
+    if (
+      uiError.errorCode !== 400 ||
+      uiError.backendError?.detail !== 'GOV_INTENT_INVALID'
+    ) {
+      super.openResponseError(error);
+      return;
+    }
+
+    const items = this.getValidationItems(
+      uiError.backendError,
+    );
+
+    if (items.length === 0) {
+      super.openResponseError(error);
+      return;
+    }
+
+    this.openAlert('danger', {
+      title: 'Dane wymagają poprawy',
+      html: `
+        <p>Wniosek nie został utworzony.
+          Popraw dane edytowanego rekordu.</p>
+        <ul>${items.join('')}</ul>
+        <p>Jeśli komunikat nie wskazuje kolumny,
+          sprawdź wprowadzone wartości w edytowanym rekordzie.</p>
+      `,
+    });
+  }
+
+  protected override getFallbackErrorMessage(
+    errorCode: UiError['errorCode'],
+  ): NotificationMessage {
+    switch (errorCode) {
+      case 401:
+        return UPDATE_ROW_HTTP_ERROR_MESSAGES
+          .AUTHENTICATION_REQUIRED;
+
+      case 429:
+        return UPDATE_ROW_HTTP_ERROR_MESSAGES.RATE_LIMITED;
+
+      case 500:
+        return UPDATE_ROW_HTTP_ERROR_MESSAGES.SERVER_ERROR;
+
+      case 503:
+        return UPDATE_ROW_HTTP_ERROR_MESSAGES
+          .SERVICE_UNAVAILABLE;
+
+      default:
+        return super.getFallbackErrorMessage(errorCode);
+    }
+  }
+
+  private getValidationItems(problem: unknown): string[] {
+    if (
+      typeof problem !== 'object' ||
+      problem === null ||
+      !('violations' in problem) ||
+      !Array.isArray(problem.violations)
+    ) {
+      return [];
+    }
+
+    const items = new Set<string>();
+
+    for (const violation of problem.violations) {
+      if (
+        typeof violation !== 'object' ||
+        violation === null ||
+        !('message' in violation) ||
+        typeof violation.message !== 'string'
+      ) {
+        continue;
+      }
+
+      const code = violation.message;
+
+      const message =
+        Object.prototype.hasOwnProperty.call(
+          UPDATE_ROW_VALIDATION_MESSAGES,
+          code,
+        )
+          ? UPDATE_ROW_VALIDATION_MESSAGES[code] ??
+            'Wartość nie spełnia wymagań walidacji.'
+          : 'Wartość nie spełnia wymagań walidacji.';
+
+      const field =
+        'field' in violation &&
+        typeof violation.field === 'string'
+          ? violation.field
+          : '';
+
+      // Obsługuje ścieżkę całego rekordu
+      // oraz opcjonalną nazwę kolumny.
+      const columnMatch =
+        /^(?:rows\[\d+\]\.)?newValues\.(.+)$/.exec(field);
+
+      const column = columnMatch?.[1];
+
+      const location = column
+        ? `Kolumna ${this.escapeValidationHtml(column)}: `
+        : '';
+
+      items.add(
+        `<li>${location}${this.escapeValidationHtml(message)}</li>`,
+      );
+    }
+
+    return [...items];
+  }
+
+  private escapeValidationHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 }
+
+
+
+
+
+
+
+GOV_EXECUTION_CONFLICT: {
+  title: 'Nie można zgłosić zmiany',
+  html: `
+    <p>Serwer odmówił wykonania operacji.
+      Wniosek nie został utworzony.</p>
+    <p>Odśwież dane i sprawdź ich aktualny stan.
+      Jeśli problem nadal występuje,
+      skontaktuj się z administratorem.</p>
+  `,
+},
+
+GOV_POLICY_VERSION_DRIFT: {
+  title: 'Nie można zgłosić zmiany',
+  html: `
+    <p>Wystąpił problem z zapisanymi zasadami
+      rozpatrywania wniosku.
+      Operacja nie została wykonana.</p>
+    <p>Skontaktuj się z administratorem.</p>
+  `,
+},
+
+
+
+
+
+
+
+
+conflict: {
+  title: 'Nie można zgłosić zmiany',
+  html: `
+    <p>Żądanie nie mogło zostać wykonane
+      z powodu konfliktu z aktualnym stanem systemu.
+      Operacja nie została wykonana.</p>
+    <p>Odśwież dane i sprawdź istniejące wnioski.
+      Jeśli problem nadal występuje,
+      skontaktuj się z administratorem.</p>
+  `,
+},
+
+
+
+
+
+CREATED: {
+  title: 'Wniosek o zmianę został utworzony',
+  html: `
+    <p>Wniosek o zmianę danych został pomyślnie utworzony.
+      Dane nie zostały jeszcze zmienione.</p>
+    <p>Wniosek zostanie przekazany do rozpatrzenia.
+      Status rozpatrywania i wynik realizacji zmiany
+      możesz sprawdzić w szczegółach wniosku.</p>
+  `,
+},
