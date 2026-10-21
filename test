@@ -1,242 +1,27 @@
-private sendUpdate<T extends string = string>(
-  payload: RowEditRequestPayload<T>,
-  rowEditTarget: RowEditTarget,
-) {
-  const request: RowEditRequest = {
-    targetCode: rowEditTarget,
-    clientKey: crypto.randomUUID(),
-    keepOther: true,
-    rows: [
-      {
-        pkValue: String(payload.pkValue),
-        expectedVersion: payload.expectedVersion,
-        newValues: payload.newValues,
-      },
-    ],
-  };
+const RESOURCE_BUSY_RETRY_COUNT = 2;
+const RESOURCE_BUSY_RETRY_DELAY_MS = 500;
 
-  return defer(() =>
-    this.rowEditApiService.submitChanges(request),
-  ).pipe(
-    retry({
-      count: 2,
+private retryResourceBusy<T>(): MonoTypeOperatorFunction<T> {
+  return retry<T>({
+    count: RESOURCE_BUSY_RETRY_COUNT,
 
-      delay: (error: unknown, retryCount: number) => {
-        const uiError = mapErrorToUiError(error);
+    delay: (error: unknown, retryCount: number) => {
+      const uiError = mapErrorToUiError(error);
 
-        const isResourceBusy =
-          uiError.errorCode === 409 &&
-          uiError.backendError?.detail ===
-            'GOV_RESOURCE_BUSY';
+      const isResourceBusy =
+        uiError.errorCode === 409 &&
+        uiError.backendError?.detail ===
+          'GOV_RESOURCE_BUSY';
 
-        if (!isResourceBusy) {
-          return throwError(() => error);
-        }
-
-        return timer(500 * retryCount);
-      },
-    }),
-  );
-}
-
-
-
-
-
-
-
-const UPDATE_ROW_VALIDATION_MESSAGES:
-  Readonly<Partial<Record<string, string>>> = {
-    ROWEDIT_VALUE_NOT_A_DATE:
-      'Nieprawidłowy format daty.',
-
-    ROWEDIT_VALUE_NUMBER_OUT_OF_RANGE:
-      'Liczba przekracza zakres lub dopuszczalną precyzję kolumny.',
-  };
-
-export { UPDATE_ROW_VALIDATION_MESSAGES };
-
-
-
-
-
-
-
-
-
-
-import { Injectable } from '@angular/core';
-
-import {
-  NotificationDialogBase,
-  type NotificationMessage,
-} from '@shared/notifications';
-
-import {
-  mapErrorToUiError,
-  type UiError,
-} from '@shared/error';
-
-import {
-  UPDATE_ROW_DIALOG_CONFIG,
-  UPDATE_ROW_HTTP_ERROR_MESSAGES,
-  UPDATE_ROW_SUCCESS_MESSAGES,
-  UPDATE_ROW_VALIDATION_MESSAGES,
-  createUpdateRowConfirmation,
-  type UpdateRowConfirmationData,
-} from './update-row.notifications';
-
-@Injectable({
-  providedIn: 'root',
-})
-export class UpdateRowDialogService
-  extends NotificationDialogBase<'UPDATE'> {
-  constructor() {
-    super(UPDATE_ROW_DIALOG_CONFIG);
-  }
-
-  openUpdateConfirmation(
-    data: UpdateRowConfirmationData,
-    onAccept: () => void,
-    onReject: () => void,
-  ): void {
-    this.openConfirmationMessage(
-      createUpdateRowConfirmation(data),
-      onAccept,
-      onReject,
-    );
-  }
-
-  openSuccess(created: boolean): void {
-    this.openAlert(
-      'success',
-      created
-        ? UPDATE_ROW_SUCCESS_MESSAGES.CREATED
-        : UPDATE_ROW_SUCCESS_MESSAGES.ALREADY_CREATED,
-    );
-  }
-
-  override openResponseError(error: unknown): void {
-    const uiError = mapErrorToUiError(error);
-
-    if (
-      uiError.errorCode !== 400 ||
-      uiError.backendError?.detail !== 'GOV_INTENT_INVALID'
-    ) {
-      super.openResponseError(error);
-      return;
-    }
-
-    const items = this.getValidationItems(
-      uiError.backendError,
-    );
-
-    if (items.length === 0) {
-      super.openResponseError(error);
-      return;
-    }
-
-    this.openAlert('danger', {
-      title: 'Dane wymagają poprawy',
-      html: `
-        <p>Wniosek nie został utworzony.
-          Popraw dane edytowanego rekordu.</p>
-        <ul>${items.join('')}</ul>
-        <p>Jeśli komunikat nie wskazuje kolumny,
-          sprawdź wprowadzone wartości w edytowanym rekordzie.</p>
-      `,
-    });
-  }
-
-  protected override getFallbackErrorMessage(
-    errorCode: UiError['errorCode'],
-  ): NotificationMessage {
-    switch (errorCode) {
-      case 401:
-        return UPDATE_ROW_HTTP_ERROR_MESSAGES
-          .AUTHENTICATION_REQUIRED;
-
-      case 429:
-        return UPDATE_ROW_HTTP_ERROR_MESSAGES.RATE_LIMITED;
-
-      case 500:
-        return UPDATE_ROW_HTTP_ERROR_MESSAGES.SERVER_ERROR;
-
-      case 503:
-        return UPDATE_ROW_HTTP_ERROR_MESSAGES
-          .SERVICE_UNAVAILABLE;
-
-      default:
-        return super.getFallbackErrorMessage(errorCode);
-    }
-  }
-
-  private getValidationItems(problem: unknown): string[] {
-    if (
-      typeof problem !== 'object' ||
-      problem === null ||
-      !('violations' in problem) ||
-      !Array.isArray(problem.violations)
-    ) {
-      return [];
-    }
-
-    const items = new Set<string>();
-
-    for (const violation of problem.violations) {
-      if (
-        typeof violation !== 'object' ||
-        violation === null ||
-        !('message' in violation) ||
-        typeof violation.message !== 'string'
-      ) {
-        continue;
+      if (!isResourceBusy) {
+        return throwError(() => error);
       }
 
-      const code = violation.message;
-
-      const message =
-        Object.prototype.hasOwnProperty.call(
-          UPDATE_ROW_VALIDATION_MESSAGES,
-          code,
-        )
-          ? UPDATE_ROW_VALIDATION_MESSAGES[code] ??
-            'Wartość nie spełnia wymagań walidacji.'
-          : 'Wartość nie spełnia wymagań walidacji.';
-
-      const field =
-        'field' in violation &&
-        typeof violation.field === 'string'
-          ? violation.field
-          : '';
-
-      // Obsługuje ścieżkę całego rekordu
-      // oraz opcjonalną nazwę kolumny.
-      const columnMatch =
-        /^(?:rows\[\d+\]\.)?newValues\.(.+)$/.exec(field);
-
-      const column = columnMatch?.[1];
-
-      const location = column
-        ? `Kolumna ${this.escapeValidationHtml(column)}: `
-        : '';
-
-      items.add(
-        `<li>${location}${this.escapeValidationHtml(message)}</li>`,
+      return timer(
+        RESOURCE_BUSY_RETRY_DELAY_MS * retryCount,
       );
-    }
-
-    return [...items];
-  }
-
-  private escapeValidationHtml(value: string): string {
-    return value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
+    },
+  });
 }
 
 
@@ -245,26 +30,68 @@ export class UpdateRowDialogService
 
 
 
-GOV_EXECUTION_CONFLICT: {
-  title: 'Nie można zgłosić zmiany',
-  html: `
-    <p>Serwer odmówił wykonania operacji.
-      Wniosek nie został utworzony.</p>
-    <p>Odśwież dane i sprawdź ich aktualny stan.
-      Jeśli problem nadal występuje,
-      skontaktuj się z administratorem.</p>
-  `,
-},
 
-GOV_POLICY_VERSION_DRIFT: {
-  title: 'Nie można zgłosić zmiany',
-  html: `
-    <p>Wystąpił problem z zapisanymi zasadami
-      rozpatrywania wniosku.
-      Operacja nie została wykonana.</p>
-    <p>Skontaktuj się z administratorem.</p>
-  `,
-},
+private setAttribute(
+  payload: SetAttributePayload,
+  parentName: string,
+): void {
+  this.loaderService.show();
+
+  defer(() =>
+    this.attributeCommandsApi.setAttribute(payload),
+  )
+    .pipe(
+      this.retryResourceBusy(),
+
+      finalize(() => {
+        this.loaderService.hide();
+      }),
+    )
+    .subscribe({
+      next: ({ data }) => {
+        this.dialogService.openSuccess('SET', {
+          attributeName: payload.attributeName,
+          parentName,
+          created: data.created,
+        });
+      },
+
+      error: (error: unknown) => {
+        this.dialogService.openResponseError(error);
+      },
+    });
+}
+
+private clearAttribute(
+  payload: ClearAttributePayload,
+  parentName: string,
+): void {
+  this.loaderService.show();
+
+  defer(() =>
+    this.attributeCommandsApi.clearAttribute(payload),
+  )
+    .pipe(
+      this.retryResourceBusy(),
+
+      finalize(() => {
+        this.loaderService.hide();
+      }),
+    )
+    .subscribe({
+      next: ({ data }) => {
+        this.dialogService.openSuccess('CLEAR', {
+          attributeName: payload.attributeName,
+          parentName,
+          created: data.created,
+        });
+      },
+
+      error: (error: unknown) => {
+        this.dialogService.openResponseError(error);
+      },
+    });
+}
 
 
 
@@ -273,29 +100,187 @@ GOV_POLICY_VERSION_DRIFT: {
 
 
 
-conflict: {
-  title: 'Nie można zgłosić zmiany',
+
+
+const ATTRIBUTE_GOV_ERROR_MESSAGES = {
+  GOV_INTENT_INVALID: ATTRIBUTE_INVALID_REQUEST_MESSAGE,
+
+  GOV_NOT_ELIGIBLE: ATTRIBUTE_FORBIDDEN_MESSAGE,
+
+  GOV_QUORUM_INFEASIBLE: {
+    title: 'Brakuje osób uprawnionych do zatwierdzenia',
+    html: `
+      <p>Nie ma wystarczającej liczby uprawnionych osób,
+        aby zatwierdzić tę zmianę.
+        Wniosek nie został utworzony.</p>
+      <p>Skontaktuj się z administratorem,
+        aby ustalić dalszy sposób postępowania.</p>
+    `,
+  },
+
+  GOV_TARGET_NOT_REGISTERED: {
+    title: 'Ten rodzaj zmiany jest niedostępny',
+    html: `
+      <p>System nie może obecnie obsłużyć
+        tego rodzaju zmiany.
+        Wniosek nie został utworzony.</p>
+      <p>Skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_RESOURCE_BUSY: {
+    title: 'Nie można teraz zgłosić zmiany atrybutu',
+    html: `
+      <p>Trwa inna operacja dotycząca powiązanej sprawy
+        lub danych. Zmiana nie została zgłoszona.</p>
+      <p>Odczekaj chwilę, sprawdź aktualne dane
+        i spróbuj ponownie.</p>
+    `,
+  },
+
+  GOV_RESOURCE_CONFLICT: {
+    title: 'Nie można zgłosić zmiany atrybutu',
+    html: `
+      <p>Zmiana koliduje z inną sprawą
+        lub aktualnym stanem powiązanych danych.
+        Wniosek nie został utworzony.</p>
+      <p>Odśwież dane i sprawdź istniejące wnioski.
+        Jeśli problem nadal występuje,
+        skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_CLIENT_KEY_CONFLICT: {
+    title: 'Nie można zgłosić zmiany atrybutu',
+    html: `
+      <p>Identyfikator operacji został już użyty
+        dla innego żądania.
+        Nowy wniosek nie został utworzony.</p>
+      <p>Jeśli problem się powtarza,
+        skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_EXECUTION_CONFLICT: {
+    title: 'Nie można zgłosić zmiany atrybutu',
+    html: `
+      <p>Serwer odmówił wykonania operacji.
+        Żądanie nie zostało wykonane.</p>
+      <p>Odśwież dane i sprawdź ich aktualny stan.
+        Jeśli problem nadal występuje,
+        skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_SCOPE_FACTS_MISSING: {
+    title: 'Nie można zgłosić zmiany atrybutu',
+    html: `
+      <p>Wystąpił problem konfiguracji systemu.
+        Żądanie nie zostało wykonane.</p>
+      <p>Skontaktuj się z administratorem.</p>
+    `,
+  },
+
+  GOV_POLICY_VERSION_DRIFT: {
+    title: 'Nie można zgłosić zmiany atrybutu',
+    html: `
+      <p>Wystąpił problem z zapisanymi zasadami
+        rozpatrywania wniosku.
+        Żądanie nie zostało wykonane.</p>
+      <p>Skontaktuj się z administratorem.</p>
+    `,
+  },
+} satisfies Record<string, NotificationMessage>;
+
+
+
+
+
+
+
+
+
+
+
+errors: ATTRIBUTE_GOV_ERROR_MESSAGES,
+
+
+
+
+const ATTRIBUTE_CONFLICT_MESSAGE: NotificationMessage = {
+  title: 'Nie można zgłosić zmiany atrybutu',
   html: `
     <p>Żądanie nie mogło zostać wykonane
-      z powodu konfliktu z aktualnym stanem systemu.
-      Operacja nie została wykonana.</p>
+      z powodu konfliktu z aktualnym stanem systemu.</p>
     <p>Odśwież dane i sprawdź istniejące wnioski.
       Jeśli problem nadal występuje,
       skontaktuj się z administratorem.</p>
   `,
-},
+};
 
 
 
 
 
-CREATED: {
-  title: 'Wniosek o zmianę został utworzony',
-  html: `
-    <p>Wniosek o zmianę danych został pomyślnie utworzony.
-      Dane nie zostały jeszcze zmienione.</p>
-    <p>Wniosek zostanie przekazany do rozpatrzenia.
-      Status rozpatrywania i wynik realizacji zmiany
-      możesz sprawdzić w szczegółach wniosku.</p>
-  `,
-},
+
+const ATTRIBUTE_CONFIRMATION_MESSAGES = {
+  SET: {
+    title: 'Zmiana wartości atrybutu',
+    html: `
+      <p>Czy na pewno chcesz zgłosić
+        zmianę wartości atrybutu?</p>
+      <p>Zostanie utworzony wniosek do rozpatrzenia.
+        Samo zgłoszenie nie zmienia wartości atrybutu.</p>
+    `,
+  },
+
+  CLEAR: {
+    title: 'Usunięcie wartości atrybutu',
+    html: `
+      <p>Czy na pewno chcesz zgłosić
+        usunięcie wartości atrybutu?</p>
+      <p>Zostanie utworzony wniosek do rozpatrzenia.
+        Samo zgłoszenie nie usuwa wartości atrybutu.</p>
+      <p>Wniosek dotyczy usunięcia wartości,
+        a nie samego atrybutu.</p>
+    `,
+  },
+} satisfies Record<AttributeChangeAction, NotificationMessage>;
+
+
+
+
+
+const createAttributeSuccessMessage = (
+  action: AttributeChangeAction,
+  data: AttributeSuccessData,
+): NotificationMessage => {
+  if (!data.created) {
+    return {
+      title: 'Wniosek już istnieje',
+      html: `
+        <p>Ta czynność została już wcześniej zgłoszona.
+          Nie utworzono kolejnego wniosku.</p>
+        ${createAttributeDetails(data)}
+        <p>Sprawdź status istniejącego wniosku,
+          aby ustalić dalszy przebieg jego rozpatrywania.</p>
+      `,
+    };
+  }
+
+  const operationMessage =
+    action === 'SET'
+      ? 'Wniosek o zmianę wartości atrybutu został utworzony.'
+      : 'Wniosek o usunięcie wartości atrybutu został utworzony.';
+
+  return {
+    title: 'Wniosek został utworzony',
+    html: `
+      <p>${operationMessage}</p>
+      ${createAttributeDetails(data)}
+      <p>Wartość atrybutu nie została jeszcze zmieniona.</p>
+      <p>Status rozpatrywania i wynik realizacji zmiany
+        możesz sprawdzić w szczegółach wniosku.</p>
+    `,
+  };
+};
