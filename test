@@ -3,25 +3,27 @@ import { inject, Injectable } from '@angular/core';
 import {
   defer,
   finalize,
-  retry,
+  retry as retryRequest,
   throwError,
   timer,
+  type Observable,
 } from 'rxjs';
 
 import {
   GovernanceCommandsApi,
   GovernanceRefreshEvent,
+  type GovernanceIncidentDecisionResponse,
 } from '@entities/governance';
 
 import { mapErrorToUiError } from '@shared/error';
 
 import type {
-  CancelCaseFeaturePayload,
-} from './model/cancel-case.model';
+  IncidentDecideProps,
+} from './model/incident-decision.model';
 
 import {
-  CancelCaseDialogService,
-} from './model/cancel-case-dialog.service';
+  IncidentDecisionDialogService,
+} from './model/incident-decision-dialog.service';
 
 import {
   MtLoaderService,
@@ -31,44 +33,97 @@ const RESOURCE_BUSY_RETRY_COUNT = 2;
 const RESOURCE_BUSY_RETRY_DELAY_MS = 500;
 
 @Injectable()
-export class CancelCaseFeature {
+export class IncidentDecisionFeature {
   private readonly loaderService = inject(MtLoaderService);
 
   private readonly governanceCommandsApi =
     inject(GovernanceCommandsApi);
 
-  private readonly dialogService =
-    inject(CancelCaseDialogService);
-
-  private readonly caseRefreshEvent =
+  private readonly governanceRefreshEvent =
     inject(GovernanceRefreshEvent);
 
-  cancel(
-    payload: CancelCaseFeaturePayload | null | undefined,
-  ): void {
-    if (!payload) {
-      this.dialogService.openInvalidPayload();
+  private readonly incidentDecisionDialogService =
+    inject(IncidentDecisionDialogService);
+
+  public decide(props: IncidentDecideProps): void {
+    const { decisionPayload, decisionKind } = props;
+
+    if (!decisionPayload) {
+      this.incidentDecisionDialogService.openInvalidPayload();
       return;
     }
 
-    this.dialogService.openConfirmation('CANCEL', () => {
-      this.sendCancelCase(payload);
-    });
+    const reason = decisionPayload.reason?.trim();
+
+    if (!reason) {
+      this.incidentDecisionDialogService.openReasonRequired();
+      return;
+    }
+
+    const preparedProps: IncidentDecideProps = {
+      ...props,
+      decisionPayload: {
+        ...decisionPayload,
+        reason,
+      },
+    };
+
+    switch (decisionKind) {
+      case 'ABANDON':
+        this.incidentDecisionDialogService.abandonConfirmation(
+          () => this.abandon(preparedProps),
+        );
+        return;
+
+      case 'RETRY':
+        this.incidentDecisionDialogService.retryConfirmation(
+          () => this.retry(preparedProps),
+        );
+        return;
+
+      default: {
+        const unhandledKind: never = decisionKind;
+
+        throw new Error(
+          `Unhandled incident decision kind: ${unhandledKind}`,
+        );
+      }
+    }
   }
 
-  private sendCancelCase(
-    payload: CancelCaseFeaturePayload,
+  private abandon(props: IncidentDecideProps): void {
+    this.executeDecision(
+      () =>
+        this.governanceCommandsApi.incidentAbandon(
+          props.decisionPayload,
+          String(props.incId),
+        ),
+      props,
+    );
+  }
+
+  private retry(props: IncidentDecideProps): void {
+    this.executeDecision(
+      () =>
+        this.governanceCommandsApi.incidentRetry(
+          props.decisionPayload,
+          String(props.incId),
+        ),
+      props,
+    );
+  }
+
+  private executeDecision(
+    createRequest: () => Observable<{
+      data: GovernanceIncidentDecisionResponse;
+    }>,
+    { incId, decisionKind }: IncidentDecideProps,
   ): void {
     this.loaderService.show();
 
-    defer(() =>
-      this.governanceCommandsApi.caseCancel(
-        payload,
-        payload.caseId,
-      ),
-    )
+    defer(createRequest)
       .pipe(
-        retry({
+        retryRequest({
           count: RESOURCE_BUSY_RETRY_COUNT,
 
           delay: (error: unknown, retryCount: number) => {
@@ -94,20 +149,20 @@ export class CancelCaseFeature {
         }),
       )
       .subscribe({
-        next: response => {
-          this.caseRefreshEvent.refreshCase(
-            +payload.caseId,
-          );
+        next: () => {
+          this.governanceRefreshEvent.refreshIncident(incId);
 
-          this.dialogService.openSuccess(response.data);
+          this.incidentDecisionDialogService.success(
+            decisionKind,
+          );
         },
 
         error: (error: unknown) => {
-          this.caseRefreshEvent.refreshCase(
-            +payload.caseId,
-          );
+          this.governanceRefreshEvent.refreshIncident(incId);
 
-          this.dialogService.openResponseError(error);
+          this.incidentDecisionDialogService.openResponseError(
+            error,
+          );
         },
       });
   }
@@ -119,27 +174,10 @@ export class CancelCaseFeature {
 
 
 
-
-NOT_FOUND: {
-  title: 'Nie znaleziono wniosku',
-  html: `
-    <p>Nie znaleziono wskazanego wniosku.
-      Anulowanie nie zostało wykonane.</p>
-    <p>Wróć do listy wniosków i odśwież ją.</p>
-  `,
-},
-
-
-
-
-
-
-
-
 import { Injectable } from '@angular/core';
 
 import type {
-  GovernanceCaseDecisionResponse,
+  IncidentDecisionKind,
 } from '@entities/governance';
 
 import {
@@ -147,42 +185,37 @@ import {
 } from '@shared/notifications';
 
 import {
-  CANCEL_CASE_DIALOG_CONFIG,
-  CANCEL_CASE_RESULT_MESSAGES,
-} from './cancel-case-notifications.model';
+  INCIDENT_DIALOG_CONFIG,
+  INCIDENT_REASON_REQUIRED_MESSAGE,
+  INCIDENT_SUCCESS_MESSAGES,
+} from './incident-decision-notification.model';
 
 @Injectable()
-export class CancelCaseDialogService
-  extends NotificationDialogBase<'CANCEL'> {
+export class IncidentDecisionDialogService
+  extends NotificationDialogBase<IncidentDecisionKind> {
   constructor() {
-    super(CANCEL_CASE_DIALOG_CONFIG);
+    super(INCIDENT_DIALOG_CONFIG);
   }
 
-  openSuccess(
-    data: GovernanceCaseDecisionResponse,
-  ): void {
-    if (data.phase === 'INCIDENT') {
-      this.openAlert(
-        'warning',
-        CANCEL_CASE_RESULT_MESSAGES.INCIDENT,
-      );
-      return;
-    }
-
-    if (
-      data.phase === 'CLOSED' &&
-      data.outcome === 'CONFLICT_REFUSED'
-    ) {
-      this.openAlert(
-        'warning',
-        CANCEL_CASE_RESULT_MESSAGES.CONFLICT_REFUSED,
-      );
-      return;
-    }
-
+  openReasonRequired(): void {
     this.openAlert(
-      'warning',
-      CANCEL_CASE_RESULT_MESSAGES.UNCONFIRMED,
+      'danger',
+      INCIDENT_REASON_REQUIRED_MESSAGE,
+    );
+  }
+
+  abandonConfirmation(onAccept: () => void): void {
+    this.openConfirmation('ABANDON', onAccept);
+  }
+
+  retryConfirmation(onAccept: () => void): void {
+    this.openConfirmation('RETRY', onAccept);
+  }
+
+  success(decisionKind: IncidentDecisionKind): void {
+    this.openAlert(
+      'success',
+      INCIDENT_SUCCESS_MESSAGES[decisionKind],
     );
   }
 }
