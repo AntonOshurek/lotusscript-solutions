@@ -1,36 +1,90 @@
-import type { NotificationMessage } from './notification.model';
+UNCONFIRMED: {
+  title: 'Wynik czynności wymaga sprawdzenia',
+  html: `
+    <p>
+      Serwer odpowiedział na żądanie,
+      ale nie udało się jednoznacznie określić
+      wyniku wybranej czynności.
+    </p>
+    <p>
+      Sprawdź aktualny status wniosku
+      oraz historię decyzji przed kolejną próbą.
+    </p>
+    <p>
+      Jeśli wynik nadal jest niejasny,
+      skontaktuj się z administratorem.
+    </p>
+  `,
+},
 
-const COMMON_HTTP_ERROR_MESSAGES: Readonly<
-  Partial<Record<number, NotificationMessage>>
-> = {
-  401: {
-    title: 'Nie udało się potwierdzić zalogowania',
+this.openAlert(
+  'warning',
+  DECISION_RESULT_MESSAGES.UNCONFIRMED,
+);
+
+
+
+
+
+
+
+
+
+
+const UPDATE_ROW_VALIDATION_FALLBACK_MESSAGE =
+  'Wartość nie spełnia wymagań walidacji.';
+
+protected override openUiError(uiError: UiError): void {
+  const backendError = uiError.backendError;
+
+  if (
+    uiError.errorCode !== 400 ||
+    backendError?.detail !== 'GOV_INTENT_INVALID' ||
+    backendError.violations.length === 0
+  ) {
+    super.openUiError(uiError);
+    return;
+  }
+
+  const messages: Readonly<Partial<Record<string, string>>> =
+    UPDATE_ROW_VALIDATION_MESSAGES;
+
+  const items = backendError.violations.map(
+    ({ field, message: code }) => {
+      const message = Object.prototype.hasOwnProperty.call(
+        messages,
+        code,
+      )
+        ? messages[code] ?? UPDATE_ROW_VALIDATION_FALLBACK_MESSAGE
+        : UPDATE_ROW_VALIDATION_FALLBACK_MESSAGE;
+
+      const column =
+        /^(?:rows\[\d+\]\.)?newValues\.(.+)$/.exec(field)?.[1];
+
+      const location = column
+        ? `Kolumna ${escapeHtml(column)}: `
+        : '';
+
+      return `<li>${location}${escapeHtml(message)}</li>`;
+    },
+  );
+
+  const validationHtml = [...new Set(items)].join('');
+
+  this.openErrorAlert(uiError, {
+    title: 'Dane wymagają poprawy',
     html: `
-      <p>System nie może potwierdzić Twojego zalogowania.</p>
       <p>
-        Odśwież stronę. Jeśli pojawi się ekran logowania,
-        zaloguj się ponownie.
+        Wniosek nie został utworzony.
+        Popraw dane edytowanego rekordu.
       </p>
+      <ul>${validationHtml}</ul>
       <p>
-        Przed ponownym wykonaniem czynności
-        sprawdź aktualny stan danych.
+        Jeśli komunikat nie wskazuje kolumny,
+        sprawdź wprowadzone wartości w edytowanym rekordzie.
       </p>
     `,
-  },
+  });
+}
 
-  429: {
-    title: 'Wysłano zbyt wiele żądań',
-    html: `
-      <p>
-        Wysłano zbyt wiele żądań w krótkim czasie.
-        Odczekaj chwilę.
-      </p>
-      <p>
-        Przed kolejną próbą sprawdź aktualny stan danych
-        i dostępne działania.
-      </p>
-    `,
-  },
-};
-
-export { COMMON_HTTP_ERROR_MESSAGES };
+this.dialogService.openResponseError(error);
