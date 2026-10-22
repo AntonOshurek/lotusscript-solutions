@@ -1,28 +1,36 @@
-openResponseError(error: unknown): void {
-  this.openUiError(mapErrorToUiError(error));
-}
+import type { NotificationMessage } from './notification.model';
 
-protected openUiError(uiError: UiError): void {
-  const detail = uiError.backendError?.detail;
+const COMMON_HTTP_ERROR_MESSAGES: Readonly<
+  Partial<Record<number, NotificationMessage>>
+> = {
+  401: {
+    title: 'Nie udało się potwierdzić zalogowania',
+    html: `
+      <p>System nie może potwierdzić Twojego zalogowania.</p>
+      <p>
+        Odśwież stronę. Jeśli pojawi się ekran logowania,
+        zaloguj się ponownie.
+      </p>
+      <p>
+        Przed ponownym wykonaniem czynności
+        sprawdź aktualny stan danych.
+      </p>
+    `,
+  },
 
-  const message =
-    typeof detail === 'string' &&
-    Object.prototype.hasOwnProperty.call(this.config.errors, detail)
-      ? this.config.errors[detail]
-      : undefined;
+  429: {
+    title: 'Wysłano zbyt wiele żądań',
+    html: `
+      <p>
+        Wysłano zbyt wiele żądań w krótkim czasie.
+        Odczekaj chwilę.
+      </p>
+      <p>
+        Przed kolejną próbą sprawdź aktualny stan danych
+        i dostępne działania.
+      </p>
+    `,
+  },
+};
 
-  this.openErrorAlert(
-    uiError,
-    message ?? this.getFallbackErrorMessage(uiError.errorCode),
-  );
-}
-
-protected openErrorAlert(
-  uiError: UiError,
-  message: NotificationMessage,
-): void {
-  this.openAlert('danger', {
-    ...message,
-    html: `${message.html}${generateRequestIdHtml(uiError.requestId)}`,
-  });
-}
+export { COMMON_HTTP_ERROR_MESSAGES };
