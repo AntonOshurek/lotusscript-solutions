@@ -1,100 +1,154 @@
-import { escapeHtml } from '@shared/lib';
+NO_EFFECT_COMPLETED: {
+  title: 'Wniosek zakończono bez wprowadzania zmian',
+  html: `
+    <p>Wniosek został zakończony bez wprowadzania zmian.</p>
+    <p>Sprawdź szczegóły wniosku i historię jego rozpatrywania.</p>
+  `,
+},
 
-import { DEFAULT_VIOLATION_MESSAGE } from '../model/error-messages.model';
-import type { ViolationsBackendError } from '../model/ui-error.model';
-
-const generateViolationHtml = (
-  violations: readonly ViolationsBackendError[],
-  messages: Readonly<Partial<Record<string, string>>>,
-): string => {
-  const items = violations.map(({ message: code }) => {
-    const message = Object.prototype.hasOwnProperty.call(messages, code)
-      ? messages[code] ?? DEFAULT_VIOLATION_MESSAGE
-      : DEFAULT_VIOLATION_MESSAGE;
-
-    return `<li>${escapeHtml(message)}</li>`;
-  });
-
-  if (items.length === 0) {
-    return '';
-  }
-
-  return `<ul>${[...new Set(items)].join('')}</ul>`;
-};
-
-export { generateViolationHtml };
-
-
-
+UNCONFIRMED: {
+  title: 'Wynik czynności wymaga sprawdzenia',
+  html: `
+    <p>
+      Serwer odpowiedział na żądanie,
+      ale otrzymany stan wniosku nie pozwala jednoznacznie
+      określić wyniku wybranej czynności.
+    </p>
+    <p>
+      Sprawdź aktualny status wniosku i historię decyzji
+      przed kolejną próbą.
+    </p>
+    <p>
+      Jeśli wynik nadal jest niejasny,
+      skontaktuj się z administratorem.
+    </p>
+  `,
+},
 
 
 
-openResponseError(error: unknown): void {
-  this.openUiError(mapErrorToUiError(error));
-}
 
-protected openUiError(uiError: UiError): void {
-  const detail = uiError.backendError?.detail;
 
-  const message =
-    typeof detail === 'string' &&
-    Object.prototype.hasOwnProperty.call(this.config.errors, detail)
-      ? this.config.errors[detail]
-      : undefined;
-
-  this.openErrorAlert(
-    uiError,
-    message ?? this.getFallbackErrorMessage(uiError.errorCode),
-  );
-}
-
-protected openErrorAlert(
-  uiError: UiError,
-  message: NotificationMessage,
+openSuccess(
+  decisionKind: GovernanceDecisionKind,
+  data: GovernanceCaseDecisionResponse,
 ): void {
-  this.openAlert('danger', {
-    ...message,
-    html: `${message.html}${generateRequestIdHtml(uiError.requestId)}`,
-  });
-}
+  const { phase, outcome } = data;
 
+  if (phase === 'CLOSED') {
+    if (outcome === 'CONFLICT_REFUSED') {
+      this.openAlert(
+        'warning',
+        DECISION_RESULT_MESSAGES.CONFLICT_REFUSED,
+      );
+      return;
+    }
 
+    if (outcome === 'FAILED_ABANDONED') {
+      this.openAlert(
+        'warning',
+        DECISION_RESULT_MESSAGES.FAILED_ABANDONED,
+      );
+      return;
+    }
 
+    if (outcome === 'NO_EFFECT_COMPLETED') {
+      this.openAlert(
+        'warning',
+        DECISION_RESULT_MESSAGES.NO_EFFECT_COMPLETED,
+      );
+      return;
+    }
 
+    if (
+      decisionKind === 'APPROVE' &&
+      outcome === 'SUCCEEDED'
+    ) {
+      this.openAlert(
+        'success',
+        DECISION_RESULT_MESSAGES.APPLIED,
+      );
+      return;
+    }
 
-
-
-
-
-protected override openUiError(uiError: UiError): void {
-  const backendError = uiError.backendError;
-
-  if (
-    uiError.errorCode !== 400 ||
-    backendError?.detail !== 'GOV_INTENT_INVALID'
-  ) {
-    super.openUiError(uiError);
-    return;
+    if (
+      decisionKind === 'REJECT' &&
+      outcome === 'REJECTED'
+    ) {
+      this.openAlert(
+        'success',
+        SUCCESS_MAKE_DECISION_NOTIFICATION.REJECT,
+      );
+      return;
+    }
   }
 
-  const violationHtml = generateViolationHtml(
-    backendError.violations,
-    UPDATE_ROW_VALIDATION_MESSAGES,
+  if (outcome == null) {
+    if (phase === 'INCIDENT') {
+      this.openAlert(
+        'warning',
+        DECISION_RESULT_MESSAGES.INCIDENT,
+      );
+      return;
+    }
+
+    if (
+      decisionKind === 'APPROVE' &&
+      [
+        'IN_REVIEW',
+        'APPROVED',
+        'SCHEDULED',
+        'EXECUTING',
+        'WAITING_EXTERNAL',
+      ].includes(phase)
+    ) {
+      this.openAlert(
+        'success',
+        DECISION_RESULT_MESSAGES.RECORDED,
+      );
+      return;
+    }
+
+    if (
+      decisionKind === 'REJECT' &&
+      phase === 'RETURNED'
+    ) {
+      this.openAlert(
+        'success',
+        DECISION_RESULT_MESSAGES.RECORDED,
+      );
+      return;
+    }
+
+    if (
+      decisionKind === 'WITHDRAW' &&
+      phase === 'IN_REVIEW'
+    ) {
+      this.openAlert(
+        'success',
+        SUCCESS_MAKE_DECISION_NOTIFICATION.WITHDRAW,
+      );
+      return;
+    }
+  }
+
+  this.openAlert(
+    'warning',
+    DECISION_RESULT_MESSAGES.UNCONFIRMED,
   );
-
-  if (!violationHtml) {
-    super.openUiError(uiError);
-    return;
-  }
-
-  this.openErrorAlert(uiError, {
-    title: 'Dane wymagają poprawy',
-    html: `
-      <p>
-        Wniosek nie został utworzony.
-        Popraw dane edytowanego rekordu.
-      </p>
-      ${violationHtml}
-    `,
-  });
 }
+
+
+
+
+// В CONFIRM_MAKE_DECISION_NOTIFICATION:
+WITHDRAW: {
+  title: 'Wycofanie decyzji',
+  html: '<p>Czy na pewno chcesz wycofać swoją decyzję na bieżącym etapie?</p>',
+},
+
+// В SUCCESS_MAKE_DECISION_NOTIFICATION:
+WITHDRAW: {
+  title: 'Decyzja została wycofana',
+  html: '<p>Twoja decyzja na bieżącym etapie została wycofana.</p>',
+},
