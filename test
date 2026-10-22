@@ -1,75 +1,91 @@
-UNCONFIRMED: {
-  title: 'Wynik czynności wymaga sprawdzenia',
-  html: `
-    <p>
-      Serwer odpowiedział na żądanie,
-      ale nie udało się jednoznacznie określić
-      wyniku wybranej czynności.
-    </p>
-    <p>
-      Sprawdź aktualny status wniosku
-      oraz historię decyzji przed kolejną próbą.
-    </p>
-    <p>
-      Jeśli wynik nadal jest niejasny,
-      skontaktuj się z administratorem.
-    </p>
-  `,
-},
+import { escapeHtml } from '@shared/lib';
 
-this.openAlert(
-  'warning',
-  DECISION_RESULT_MESSAGES.UNCONFIRMED,
-);
+import { DEFAULT_VIOLATION_MESSAGE } from '../model/error-messages.model';
+import type { ViolationsBackendError } from '../model/ui-error.model';
 
+const generateViolationHtml = (
+  violations: readonly ViolationsBackendError[],
+  messages: Readonly<Partial<Record<string, string>>>,
+): string => {
+  const items = violations.map(({ message: code }) => {
+    const message = Object.prototype.hasOwnProperty.call(messages, code)
+      ? messages[code] ?? DEFAULT_VIOLATION_MESSAGE
+      : DEFAULT_VIOLATION_MESSAGE;
 
+    return `<li>${escapeHtml(message)}</li>`;
+  });
 
+  if (items.length === 0) {
+    return '';
+  }
 
+  return `<ul>${[...new Set(items)].join('')}</ul>`;
+};
+
+export { generateViolationHtml };
 
 
 
 
 
 
-const UPDATE_ROW_VALIDATION_FALLBACK_MESSAGE =
-  'Wartość nie spełnia wymagań walidacji.';
+openResponseError(error: unknown): void {
+  this.openUiError(mapErrorToUiError(error));
+}
+
+protected openUiError(uiError: UiError): void {
+  const detail = uiError.backendError?.detail;
+
+  const message =
+    typeof detail === 'string' &&
+    Object.prototype.hasOwnProperty.call(this.config.errors, detail)
+      ? this.config.errors[detail]
+      : undefined;
+
+  this.openErrorAlert(
+    uiError,
+    message ?? this.getFallbackErrorMessage(uiError.errorCode),
+  );
+}
+
+protected openErrorAlert(
+  uiError: UiError,
+  message: NotificationMessage,
+): void {
+  this.openAlert('danger', {
+    ...message,
+    html: `${message.html}${generateRequestIdHtml(uiError.requestId)}`,
+  });
+}
+
+
+
+
+
+
+
+
 
 protected override openUiError(uiError: UiError): void {
   const backendError = uiError.backendError;
 
   if (
     uiError.errorCode !== 400 ||
-    backendError?.detail !== 'GOV_INTENT_INVALID' ||
-    backendError.violations.length === 0
+    backendError?.detail !== 'GOV_INTENT_INVALID'
   ) {
     super.openUiError(uiError);
     return;
   }
 
-  const messages: Readonly<Partial<Record<string, string>>> =
-    UPDATE_ROW_VALIDATION_MESSAGES;
-
-  const items = backendError.violations.map(
-    ({ field, message: code }) => {
-      const message = Object.prototype.hasOwnProperty.call(
-        messages,
-        code,
-      )
-        ? messages[code] ?? UPDATE_ROW_VALIDATION_FALLBACK_MESSAGE
-        : UPDATE_ROW_VALIDATION_FALLBACK_MESSAGE;
-
-      const column =
-        /^(?:rows\[\d+\]\.)?newValues\.(.+)$/.exec(field)?.[1];
-
-      const location = column
-        ? `Kolumna ${escapeHtml(column)}: `
-        : '';
-
-      return `<li>${location}${escapeHtml(message)}</li>`;
-    },
+  const violationHtml = generateViolationHtml(
+    backendError.violations,
+    UPDATE_ROW_VALIDATION_MESSAGES,
   );
 
-  const validationHtml = [...new Set(items)].join('');
+  if (!violationHtml) {
+    super.openUiError(uiError);
+    return;
+  }
 
   this.openErrorAlert(uiError, {
     title: 'Dane wymagają poprawy',
@@ -78,13 +94,7 @@ protected override openUiError(uiError: UiError): void {
         Wniosek nie został utworzony.
         Popraw dane edytowanego rekordu.
       </p>
-      <ul>${validationHtml}</ul>
-      <p>
-        Jeśli komunikat nie wskazuje kolumny,
-        sprawdź wprowadzone wartości w edytowanym rekordzie.
-      </p>
+      ${violationHtml}
     `,
   });
 }
-
-this.dialogService.openResponseError(error);
