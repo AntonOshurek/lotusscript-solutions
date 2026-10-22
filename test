@@ -1,154 +1,54 @@
-NO_EFFECT_COMPLETED: {
-  title: 'Wniosek zakończono bez wprowadzania zmian',
+CANCELLED: {
+  title: 'Wniosek został anulowany',
   html: `
-    <p>Wniosek został zakończony bez wprowadzania zmian.</p>
-    <p>Sprawdź szczegóły wniosku i historię jego rozpatrywania.</p>
+    <p>Wniosek ma status zakończony z wynikiem anulowania.</p>
+    <p>Sprawdź historię wniosku, aby ustalić przebieg jego obsługi.</p>
   `,
 },
 
-UNCONFIRMED: {
-  title: 'Wynik czynności wymaga sprawdzenia',
+EXPIRED: {
+  title: 'Wniosek wygasł',
   html: `
-    <p>
-      Serwer odpowiedział na żądanie,
-      ale otrzymany stan wniosku nie pozwala jednoznacznie
-      określić wyniku wybranej czynności.
-    </p>
-    <p>
-      Sprawdź aktualny status wniosku i historię decyzji
-      przed kolejną próbą.
-    </p>
-    <p>
-      Jeśli wynik nadal jest niejasny,
-      skontaktuj się z administratorem.
-    </p>
+    <p>Wniosek został zakończony z powodu wygaśnięcia.</p>
+    <p>Sprawdź szczegóły wniosku i dostępne dalsze działania.</p>
   `,
 },
 
 
 
 
-
-openSuccess(
-  decisionKind: GovernanceDecisionKind,
-  data: GovernanceCaseDecisionResponse,
-): void {
-  const { phase, outcome } = data;
-
-  if (phase === 'CLOSED') {
-    if (outcome === 'CONFLICT_REFUSED') {
-      this.openAlert(
-        'warning',
-        DECISION_RESULT_MESSAGES.CONFLICT_REFUSED,
-      );
-      return;
-    }
-
-    if (outcome === 'FAILED_ABANDONED') {
-      this.openAlert(
-        'warning',
-        DECISION_RESULT_MESSAGES.FAILED_ABANDONED,
-      );
-      return;
-    }
-
-    if (outcome === 'NO_EFFECT_COMPLETED') {
-      this.openAlert(
-        'warning',
-        DECISION_RESULT_MESSAGES.NO_EFFECT_COMPLETED,
-      );
-      return;
-    }
-
-    if (
-      decisionKind === 'APPROVE' &&
-      outcome === 'SUCCEEDED'
-    ) {
-      this.openAlert(
-        'success',
-        DECISION_RESULT_MESSAGES.APPLIED,
-      );
-      return;
-    }
-
-    if (
-      decisionKind === 'REJECT' &&
-      outcome === 'REJECTED'
-    ) {
-      this.openAlert(
-        'success',
-        SUCCESS_MAKE_DECISION_NOTIFICATION.REJECT,
-      );
-      return;
-    }
-  }
-
-  if (outcome == null) {
-    if (phase === 'INCIDENT') {
-      this.openAlert(
-        'warning',
-        DECISION_RESULT_MESSAGES.INCIDENT,
-      );
-      return;
-    }
-
-    if (
-      decisionKind === 'APPROVE' &&
-      [
-        'IN_REVIEW',
-        'APPROVED',
-        'SCHEDULED',
-        'EXECUTING',
-        'WAITING_EXTERNAL',
-      ].includes(phase)
-    ) {
-      this.openAlert(
-        'success',
-        DECISION_RESULT_MESSAGES.RECORDED,
-      );
-      return;
-    }
-
-    if (
-      decisionKind === 'REJECT' &&
-      phase === 'RETURNED'
-    ) {
-      this.openAlert(
-        'success',
-        DECISION_RESULT_MESSAGES.RECORDED,
-      );
-      return;
-    }
-
-    if (
-      decisionKind === 'WITHDRAW' &&
-      phase === 'IN_REVIEW'
-    ) {
-      this.openAlert(
-        'success',
-        SUCCESS_MAKE_DECISION_NOTIFICATION.WITHDRAW,
-      );
-      return;
-    }
-  }
-
+if (outcome === 'CANCELLED') {
   this.openAlert(
     'warning',
-    DECISION_RESULT_MESSAGES.UNCONFIRMED,
+    DECISION_RESULT_MESSAGES.CANCELLED,
   );
+  return;
+}
+
+if (outcome === 'EXPIRED') {
+  this.openAlert(
+    'warning',
+    DECISION_RESULT_MESSAGES.EXPIRED,
+  );
+  return;
 }
 
 
 
 
-// В CONFIRM_MAKE_DECISION_NOTIFICATION:
-WITHDRAW: {
-  title: 'Wycofanie decyzji',
-  html: '<p>Czy na pewno chcesz wycofać swoją decyzję na bieżącym etapie?</p>',
-},
 
-// В SUCCESS_MAKE_DECISION_NOTIFICATION:
-WITHDRAW: {
-  title: 'Decyzja została wycofana',
-  html: '<p>Twoja decyzja na bieżącym etapie została wycofana.</p>',
-},
+
+
+data.phase === 'CLOSED' && data.outcome === 'SUCCEEDED'
+
+
+if (
+  data.phase === 'CLOSED' &&
+  data.outcome === 'CANCELLED'
+) {
+  this.openAlert(
+    'success',
+    CANCEL_CASE_RESULT_MESSAGES.SUCCEEDED,
+  );
+  return;
+}
