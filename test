@@ -1,80 +1,3 @@
-openInvalidPayload(reason?: string): void {
-  const message = this.config.invalidPayload;
-  const description = reason?.trim();
-
-  this.openAlert('danger', {
-    ...message,
-    html: description
-      ? `<p>${escapeHtml(description)}</p>${message.html}`
-      : message.html,
-  });
-}
-
-
-
-
-const UPDATE_ROW_INVALID_PAYLOAD_REASONS = {
-  EMPTY_PAYLOAD:
-    'Brakuje danych potrzebnych do przygotowania żądania.',
-
-  MISSING_TARGET:
-    'W metadanych brakuje kodu tabeli.',
-
-  UNSUPPORTED_KEY:
-    'Edycja wymaga dokładnie jednej kolumny klucza rekordu.',
-
-  MISSING_KEY_COLUMN:
-    'W metadanych nie określono kolumny identyfikatora rekordu.',
-
-  MISSING_VERSION_COLUMN:
-    'W metadanych nie określono kolumny wersji rekordu.',
-
-  MISSING_ID:
-    'W danych rekordu brakuje pola identyfikatora.',
-
-  MISSING_VERSION:
-    'W danych rekordu brakuje pola wersji.',
-
-  EMPTY_ID:
-    'Identyfikator rekordu jest pusty.',
-
-  EMPTY_VERSION:
-    'Wersja rekordu jest pusta.',
-
-  INVALID_ID:
-    'Identyfikator rekordu ma nieprawidłowy format liczbowy.',
-
-  INVALID_VERSION:
-    'Wersja rekordu ma nieprawidłowy format liczbowy.',
-} as const;
-
-
-
-
-
-
-
-
-
-private abortByValidation(
-  onError: () => void,
-  reason: string,
-): void {
-  this.dialogService.openInvalidPayload(reason);
-  onError();
-}
-
-
-
-
-
-
-
-
-
-
-
-
 const { targetCode, keyColumns } = payload.targetMetadata;
 
 if (!targetCode?.trim()) {
@@ -104,3 +27,90 @@ if (!keyColumnName?.trim()) {
 }
 
 const keyColumn = keyColumnName.toLowerCase();
+
+
+
+
+
+const keyColumnName = payload.targetMetadata.keyColumns[0];
+const versionColumnName = payload.targetMetadata.versionColumn;
+
+if (!keyColumnName?.trim()) {
+  this.abortByValidation(
+    payload.onError,
+    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_KEY_COLUMN,
+  );
+  return;
+}
+
+if (!versionColumnName?.trim()) {
+  this.abortByValidation(
+    payload.onError,
+    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_VERSION_COLUMN,
+  );
+  return;
+}
+
+const keyColumn = keyColumnName.toLowerCase();
+const versionColumn = versionColumnName.toLowerCase();
+
+if (!Object.prototype.hasOwnProperty.call(payload.original, keyColumn)) {
+  this.abortByValidation(
+    payload.onError,
+    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_ID,
+  );
+  return;
+}
+
+if (!Object.prototype.hasOwnProperty.call(payload.original, versionColumn)) {
+  this.abortByValidation(
+    payload.onError,
+    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_VERSION,
+  );
+  return;
+}
+
+const originalPk = payload.original[keyColumn];
+const originalVersion = payload.original[versionColumn];
+
+if (
+  originalPk == null ||
+  (typeof originalPk === 'string' && originalPk.trim().length === 0)
+) {
+  this.abortByValidation(
+    payload.onError,
+    UPDATE_ROW_INVALID_PAYLOAD_REASONS.EMPTY_ID,
+  );
+  return;
+}
+
+if (
+  originalVersion == null ||
+  (typeof originalVersion === 'string' &&
+    originalVersion.trim().length === 0)
+) {
+  this.abortByValidation(
+    payload.onError,
+    UPDATE_ROW_INVALID_PAYLOAD_REASONS.EMPTY_VERSION,
+  );
+  return;
+}
+
+const pkValue = Number(originalPk);
+const expectedVersion = Number(originalVersion);
+
+if (!Number.isFinite(pkValue)) {
+  this.abortByValidation(
+    payload.onError,
+    UPDATE_ROW_INVALID_PAYLOAD_REASONS.INVALID_ID,
+  );
+  return;
+}
+
+if (!Number.isFinite(expectedVersion)) {
+  this.abortByValidation(
+    payload.onError,
+    UPDATE_ROW_INVALID_PAYLOAD_REASONS.INVALID_VERSION,
+  );
+  return;
+}
