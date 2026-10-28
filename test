@@ -1,116 +1,20 @@
-const { targetCode, keyColumns } = payload.targetMetadata;
+const GOV_ERROR_DETAILS = {
+  CASE_VERSION_CONFLICT: 'GOV_CASE_VERSION_CONFLICT',
+  STAGE_STALE: 'GOV_STAGE_STALE',
+  CASE_NOT_ACTIONABLE: 'GOV_CASE_NOT_ACTIONABLE',
+  DUPLICATE_DECISION: 'GOV_DUPLICATE_DECISION',
+  SOD_VIOLATION: 'GOV_SOD_VIOLATION',
+  MAKER_NOT_AUTHORIZED: 'GOV_MAKER_NOT_AUTHORIZED',
+  RESOURCE_BUSY: 'GOV_RESOURCE_BUSY',
+  RESOURCE_CONFLICT: 'GOV_RESOURCE_CONFLICT',
+  CLIENT_KEY_CONFLICT: 'GOV_CLIENT_KEY_CONFLICT',
+  EXECUTION_CONFLICT: 'GOV_EXECUTION_CONFLICT',
+  SCOPE_FACTS_MISSING: 'GOV_SCOPE_FACTS_MISSING',
+  POLICY_VERSION_DRIFT: 'GOV_POLICY_VERSION_DRIFT',
+  NOT_ELIGIBLE: 'GOV_NOT_ELIGIBLE',
+  INTENT_INVALID: 'GOV_INTENT_INVALID',
+  QUORUM_INFEASIBLE: 'GOV_QUORUM_INFEASIBLE',
+  TARGET_NOT_REGISTERED: 'GOV_TARGET_NOT_REGISTERED',
+} as const;
 
-if (!targetCode?.trim()) {
-  this.abortByValidation(
-    payload.onError,
-    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_TARGET,
-  );
-  return;
-}
-
-if (keyColumns.length !== 1) {
-  this.abortByValidation(
-    payload.onError,
-    UPDATE_ROW_INVALID_PAYLOAD_REASONS.UNSUPPORTED_KEY,
-  );
-  return;
-}
-
-const keyColumnName = keyColumns[0];
-
-if (!keyColumnName?.trim()) {
-  this.abortByValidation(
-    payload.onError,
-    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_KEY_COLUMN,
-  );
-  return;
-}
-
-const keyColumn = keyColumnName.toLowerCase();
-
-
-
-
-
-const keyColumnName = payload.targetMetadata.keyColumns[0];
-const versionColumnName = payload.targetMetadata.versionColumn;
-
-if (!keyColumnName?.trim()) {
-  this.abortByValidation(
-    payload.onError,
-    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_KEY_COLUMN,
-  );
-  return;
-}
-
-if (!versionColumnName?.trim()) {
-  this.abortByValidation(
-    payload.onError,
-    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_VERSION_COLUMN,
-  );
-  return;
-}
-
-const keyColumn = keyColumnName.toLowerCase();
-const versionColumn = versionColumnName.toLowerCase();
-
-if (!Object.prototype.hasOwnProperty.call(payload.original, keyColumn)) {
-  this.abortByValidation(
-    payload.onError,
-    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_ID,
-  );
-  return;
-}
-
-if (!Object.prototype.hasOwnProperty.call(payload.original, versionColumn)) {
-  this.abortByValidation(
-    payload.onError,
-    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_VERSION,
-  );
-  return;
-}
-
-const originalPk = payload.original[keyColumn];
-const originalVersion = payload.original[versionColumn];
-
-if (
-  originalPk == null ||
-  (typeof originalPk === 'string' && originalPk.trim().length === 0)
-) {
-  this.abortByValidation(
-    payload.onError,
-    UPDATE_ROW_INVALID_PAYLOAD_REASONS.EMPTY_ID,
-  );
-  return;
-}
-
-if (
-  originalVersion == null ||
-  (typeof originalVersion === 'string' &&
-    originalVersion.trim().length === 0)
-) {
-  this.abortByValidation(
-    payload.onError,
-    UPDATE_ROW_INVALID_PAYLOAD_REASONS.EMPTY_VERSION,
-  );
-  return;
-}
-
-const pkValue = Number(originalPk);
-const expectedVersion = Number(originalVersion);
-
-if (!Number.isFinite(pkValue)) {
-  this.abortByValidation(
-    payload.onError,
-    UPDATE_ROW_INVALID_PAYLOAD_REASONS.INVALID_ID,
-  );
-  return;
-}
-
-if (!Number.isFinite(expectedVersion)) {
-  this.abortByValidation(
-    payload.onError,
-    UPDATE_ROW_INVALID_PAYLOAD_REASONS.INVALID_VERSION,
-  );
-  return;
-}
+export { GOV_ERROR_DETAILS };
