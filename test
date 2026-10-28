@@ -1,321 +1,106 @@
-import type {
-  RowEditFields,
-  RowEditTarget,
-  RowEditTargetMetadata,
-  RowEditValue,
-} from '@entities/row-edit';
+openInvalidPayload(reason?: string): void {
+  const message = this.config.invalidPayload;
+  const description = reason?.trim();
 
-import type { FieldModel } from '@shared/field';
-
-type FieldsConfig<T> = Partial<Record<keyof T, FieldModel>>;
-
-type FieldNames<T> = Extract<keyof T, string>;
-
-type NewValues<T> = RowEditFields<FieldNames<T>>;
-
-interface UpdateRowConfig<T extends Record<string, unknown>> {
-  targetCode: RowEditTarget;
-  fieldNames: FieldsConfig<T>;
+  this.openAlert('danger', {
+    ...message,
+    html: description
+      ? `<p>${escapeHtml(description)}</p>${message.html}`
+      : message.html,
+  });
 }
 
-interface UpdateRowPayload<T extends Record<string, unknown>> {
-  original: T;
-  updated: T;
-  targetMetadata: RowEditTargetMetadata;
-  fieldNames: FieldsConfig<T>;
-  onSuccess: () => void;
-  onError: () => void;
-  onCancel: () => void;
+
+
+
+const UPDATE_ROW_INVALID_PAYLOAD_REASONS = {
+  EMPTY_PAYLOAD:
+    'Brakuje danych potrzebnych do przygotowania żądania.',
+
+  MISSING_TARGET:
+    'W metadanych brakuje kodu tabeli.',
+
+  UNSUPPORTED_KEY:
+    'Edycja wymaga dokładnie jednej kolumny klucza rekordu.',
+
+  MISSING_KEY_COLUMN:
+    'W metadanych nie określono kolumny identyfikatora rekordu.',
+
+  MISSING_VERSION_COLUMN:
+    'W metadanych nie określono kolumny wersji rekordu.',
+
+  MISSING_ID:
+    'W danych rekordu brakuje pola identyfikatora.',
+
+  MISSING_VERSION:
+    'W danych rekordu brakuje pola wersji.',
+
+  EMPTY_ID:
+    'Identyfikator rekordu jest pusty.',
+
+  EMPTY_VERSION:
+    'Wersja rekordu jest pusta.',
+
+  INVALID_ID:
+    'Identyfikator rekordu ma nieprawidłowy format liczbowy.',
+
+  INVALID_VERSION:
+    'Wersja rekordu ma nieprawidłowy format liczbowy.',
+} as const;
+
+
+
+
+
+
+
+
+
+private abortByValidation(
+  onError: () => void,
+  reason: string,
+): void {
+  this.dialogService.openInvalidPayload(reason);
+  onError();
 }
 
-type ChangedFields<T> = Array<{
-  name: FieldNames<T>;
-  label: string;
-  oldValue: RowEditValue;
-  newValue: RowEditValue;
-}>;
-
-export type {
-  UpdateRowConfig,
-  UpdateRowPayload,
-  FieldsConfig,
-  NewValues,
-  FieldNames,
-  ChangedFields,
-};
 
 
 
 
 
 
-import {
-  DestroyRef,
-  Injectable,
-  inject,
-  signal,
-} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { defer, finalize } from 'rxjs';
 
-import type {
-  IRowNode,
-  RowEditingStartedEvent,
-  RowEditingStoppedEvent,
-} from 'ag-grid-enterprise';
 
-import {
-  RowEditCommandsApi,
-  RowEditQueriesApi,
-  type RowEditRequest,
-  type RowEditRequestPayload,
-  type RowEditTarget,
-  type RowEditTargetMetadata,
-} from '@entities/row-edit';
 
-import { retryOnConflict } from '@shared/api';
 
-import { MtLoaderService } from '@citi-icg-172888/ng-icgds';
+const { targetCode, keyColumns } = payload.targetMetadata;
 
-import { UpdateRowDialogService } from './model/update-row-dialog.service';
-
-import type {
-  ChangedFields,
-  UpdateRowConfig,
-  UpdateRowPayload,
-} from './model/update-row.model';
-
-import {
-  createNewValuesToSubmit,
-  getChangedFields,
-} from './model/update-row.utils';
-
-@Injectable()
-export class UpdateRowFeature<
-  T extends Record<string, unknown> = Record<string, unknown>,
-> {
-  private readonly commandsApi = inject(RowEditCommandsApi);
-  private readonly queriesApi = inject(RowEditQueriesApi);
-  private readonly loaderService = inject(MtLoaderService);
-  private readonly dialogService = inject(UpdateRowDialogService);
-  private readonly destroyRef = inject(DestroyRef);
-
-  private readonly metadata = signal<RowEditTargetMetadata | null>(null);
-
-  readonly targetMetadata = this.metadata.asReadonly();
-
-  private config: UpdateRowConfig<T> | null = null;
-
-  private readonly originalRows = new WeakMap<IRowNode<T>, T>();
-
-  loadMetadata(config: UpdateRowConfig<T>): void {
-    this.config = config;
-    this.metadata.set(null);
-
-    this.queriesApi
-      .getTargetMetadata(config.targetCode)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: ({ data }) => {
-          this.metadata.set(data);
-        },
-        error: (error: unknown) => {
-          this.dialogService.openResponseError(error);
-        },
-      });
-  }
-
-  onRowEditingStarted(event: RowEditingStartedEvent<T>): void {
-    if (!event.data) {
-      return;
-    }
-
-    this.originalRows.set(
-      event.node,
-      structuredClone(event.data),
-    );
-  }
-
-  onRowEditingStopped(event: RowEditingStoppedEvent<T>): void {
-    const original = this.originalRows.get(event.node);
-
-    this.originalRows.delete(event.node);
-
-    if (!original) {
-      return;
-    }
-
-    const restoreOriginal = (): void => {
-      if (!this.destroyRef.destroyed) {
-        event.node.setData(original);
-      }
-    };
-
-    const targetMetadata = this.metadata();
-    const config = this.config;
-
-    if (!event.data || !targetMetadata || !config) {
-      restoreOriginal();
-      return;
-    }
-
-    this.handle({
-      original,
-      updated: structuredClone(event.data),
-      targetMetadata,
-      fieldNames: config.fieldNames,
-      onSuccess: restoreOriginal,
-      onError: restoreOriginal,
-      onCancel: restoreOriginal,
-    });
-  }
-
-  private handle(payload: UpdateRowPayload<T>): void {
-    const changedFields = getChangedFields<T>(
-      payload.original,
-      payload.updated,
-      payload.fieldNames,
-    );
-
-    if (changedFields.length === 0) {
-      payload.onCancel();
-      return;
-    }
-
-    const { targetCode, keyColumns } = payload.targetMetadata;
-
-    if (
-      !targetCode ||
-      keyColumns.length !== 1 ||
-      keyColumns[0].trim().length === 0
-    ) {
-      this.abortByValidation(payload.onError);
-      return;
-    }
-
-    const keyColumnName = keyColumns[0];
-    const keyColumn = keyColumnName.toLowerCase();
-
-    this.dialogService.openUpdateConfirmation(
-      {
-        recordIdLabel:
-          payload.fieldNames[keyColumnName]?.label ??
-          payload.fieldNames[keyColumn]?.label ??
-          'ID rekordu',
-        recordId: String(payload.original[keyColumn]),
-        fields: changedFields,
-      },
-      () => this.submit(payload, changedFields),
-      () => payload.onCancel(),
-    );
-  }
-
-  private abortByValidation(onError: () => void): void {
-    this.dialogService.openInvalidPayload();
-    onError();
-  }
-
-  private submit(
-    payload: UpdateRowPayload<T>,
-    changedFields: ChangedFields<T>,
-  ): void {
-    const keyColumnName = payload.targetMetadata.keyColumns[0];
-    const versionColumnName = payload.targetMetadata.versionColumn;
-
-    if (!keyColumnName || !versionColumnName) {
-      this.abortByValidation(payload.onError);
-      return;
-    }
-
-    const keyColumn = keyColumnName.toLowerCase();
-    const versionColumn = versionColumnName.toLowerCase();
-
-    if (
-      !(keyColumn in payload.original) ||
-      !(versionColumn in payload.original)
-    ) {
-      this.abortByValidation(payload.onError);
-      return;
-    }
-
-    const originalPk = payload.original[keyColumn];
-    const originalVersion = payload.original[versionColumn];
-
-    if (
-      originalPk == null ||
-      originalVersion == null ||
-      (typeof originalPk === 'string' &&
-        originalPk.trim().length === 0) ||
-      (typeof originalVersion === 'string' &&
-        originalVersion.trim().length === 0)
-    ) {
-      this.abortByValidation(payload.onError);
-      return;
-    }
-
-    const pkValue = Number(originalPk);
-    const expectedVersion = Number(originalVersion);
-
-    if (
-      !Number.isFinite(pkValue) ||
-      !Number.isFinite(expectedVersion)
-    ) {
-      this.abortByValidation(payload.onError);
-      return;
-    }
-
-    const newValues = createNewValuesToSubmit<T>(
-      payload.updated,
-      payload.targetMetadata,
-      changedFields,
-    );
-
-    this.loaderService.show();
-
-    this.sendUpdate(
-      {
-        newValues,
-        pkValue,
-        expectedVersion,
-      },
-      payload.targetMetadata.targetCode,
-    )
-      .pipe(
-        takeUntilDestroyed(this.destroyRef),
-        finalize(() => this.loaderService.hide()),
-      )
-      .subscribe({
-        next: ({ data }) => {
-          this.dialogService.openSuccess(data.created);
-          payload.onSuccess();
-        },
-        error: (error: unknown) => {
-          this.dialogService.openResponseError(error);
-          payload.onError();
-        },
-      });
-  }
-
-  private sendUpdate<K extends string>(
-    payload: RowEditRequestPayload<K>,
-    targetCode: RowEditTarget,
-  ) {
-    const request: RowEditRequest = {
-      targetCode,
-      clientKey: crypto.randomUUID(),
-      keepOther: true,
-      rows: [
-        {
-          pkValue: String(payload.pkValue),
-          expectedVersion: payload.expectedVersion,
-          newValues: payload.newValues,
-        },
-      ],
-    };
-
-    return defer(() => this.commandsApi.submitChanges(request)).pipe(
-      retryOnConflict(),
-    );
-  }
+if (!targetCode?.trim()) {
+  this.abortByValidation(
+    payload.onError,
+    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_TARGET,
+  );
+  return;
 }
+
+if (keyColumns.length !== 1) {
+  this.abortByValidation(
+    payload.onError,
+    UPDATE_ROW_INVALID_PAYLOAD_REASONS.UNSUPPORTED_KEY,
+  );
+  return;
+}
+
+const keyColumnName = keyColumns[0];
+
+if (!keyColumnName?.trim()) {
+  this.abortByValidation(
+    payload.onError,
+    UPDATE_ROW_INVALID_PAYLOAD_REASONS.MISSING_KEY_COLUMN,
+  );
+  return;
+}
+
+const keyColumn = keyColumnName.toLowerCase();
