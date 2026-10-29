@@ -1,20 +1,19 @@
-const GOV_ERROR_DETAILS = {
-  CASE_VERSION_CONFLICT: 'GOV_CASE_VERSION_CONFLICT',
-  STAGE_STALE: 'GOV_STAGE_STALE',
-  CASE_NOT_ACTIONABLE: 'GOV_CASE_NOT_ACTIONABLE',
-  DUPLICATE_DECISION: 'GOV_DUPLICATE_DECISION',
-  SOD_VIOLATION: 'GOV_SOD_VIOLATION',
-  MAKER_NOT_AUTHORIZED: 'GOV_MAKER_NOT_AUTHORIZED',
-  RESOURCE_BUSY: 'GOV_RESOURCE_BUSY',
-  RESOURCE_CONFLICT: 'GOV_RESOURCE_CONFLICT',
-  CLIENT_KEY_CONFLICT: 'GOV_CLIENT_KEY_CONFLICT',
-  EXECUTION_CONFLICT: 'GOV_EXECUTION_CONFLICT',
-  SCOPE_FACTS_MISSING: 'GOV_SCOPE_FACTS_MISSING',
-  POLICY_VERSION_DRIFT: 'GOV_POLICY_VERSION_DRIFT',
-  NOT_ELIGIBLE: 'GOV_NOT_ELIGIBLE',
-  INTENT_INVALID: 'GOV_INTENT_INVALID',
-  QUORUM_INFEASIBLE: 'GOV_QUORUM_INFEASIBLE',
-  TARGET_NOT_REGISTERED: 'GOV_TARGET_NOT_REGISTERED',
-} as const;
+import type { ColDef } from 'ag-grid-community';
+import type { FieldModel } from '@shared/field';
 
-export { GOV_ERROR_DETAILS };
+const createColumnDefs = <TData extends object>(
+  fields: Partial<Record<Extract<keyof TData, string>, FieldModel>>,
+): ColDef<TData>[] => {
+  return Object.keys(fields).map((field): ColDef<TData> => {
+    const config = fields[field as Extract<keyof TData, string>];
+
+    return {
+      field,
+      headerName: config?.label ?? field,
+      headerTooltip: field,
+      width: config?.columnWidth ?? 200,
+    };
+  });
+};
+
+export { createColumnDefs };
