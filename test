@@ -1,19 +1,123 @@
-import type { ColDef } from 'ag-grid-community';
-import type { FieldModel } from '@shared/field';
+// features/select-data-date/model/select-data-date.service.ts
+import { inject, Injectable } from '@angular/core';
+import { MtModalService } from '@citi-icg-172888/ng-icgds/modal';
 
-const createColumnDefs = <TData extends object>(
-  fields: Partial<Record<Extract<keyof TData, string>, FieldModel>>,
-): ColDef<TData>[] => {
-  return Object.keys(fields).map((field): ColDef<TData> => {
-    const config = fields[field as Extract<keyof TData, string>];
+import { DataDateContextService } from '@shared/api';
+import { escapeHtml } from '@shared/lib';
 
-    return {
-      field,
-      headerName: config?.label ?? field,
-      headerTooltip: field,
-      width: config?.columnWidth ?? 200,
-    };
-  });
-};
+@Injectable()
+export class SelectDataDateService {
+  private readonly context = inject(DataDateContextService);
+  private readonly modalService = inject(MtModalService);
 
-export { createColumnDefs };
+  public readonly dataDate = this.context.dataDate;
+
+  public setDataDate(value: string): boolean {
+    const error = this.validateDataDate(value);
+
+    if (error !== null) {
+      this.openValidationError(error);
+      return false;
+    }
+
+    this.context.setDataDate(value);
+    return true;
+  }
+
+  public resetDataDate(): void {
+    this.context.resetDataDate();
+  }
+
+  private openValidationError(message: string): void {
+    this.modalService.open({
+      status: 'warning',
+      title: 'Nieprawidłowa data',
+      html: `<p>${escapeHtml(message)}</p>`,
+      type: 'alert',
+    });
+  }
+
+  private validateDataDate(value: string): string | null {
+    if (!value.trim()) {
+      return 'Wybierz datę.';
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return 'Podaj datę w formacie RRRR-MM-DD.';
+    }
+
+    const date = new Date(`${value}T00:00:00.000Z`);
+
+    if (
+      Number.isNaN(date.getTime()) ||
+      date.toISOString().slice(0, 10) !== value
+    ) {
+      return 'Podaj prawidłową datę.';
+    }
+
+    return null;
+  }
+}
+
+
+
+
+
+
+
+// shared/api/model/data-date-context.service.ts
+import { isPlatformBrowser } from '@angular/common';
+import { inject, Injectable, PLATFORM_ID, signal } from '@angular/core';
+
+const STORAGE_KEY = 'dataDate';
+
+@Injectable({ providedIn: 'root' })
+export class DataDateContextService {
+  private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
+
+  private readonly selectedDate = signal<string | null>(
+    this.readStoredDate(),
+  );
+
+  public readonly dataDate = this.selectedDate.asReadonly();
+
+  public setDataDate(value: string): void {
+    this.selectedDate.set(value);
+
+    if (!this.isBrowser) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(STORAGE_KEY, value);
+    } catch {
+      // Дата остаётся в памяти.
+    }
+  }
+
+  public resetDataDate(): void {
+    this.selectedDate.set(null);
+
+    if (!this.isBrowser) {
+      return;
+    }
+
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Дата в памяти сброшена.
+    }
+  }
+
+  private readStoredDate(): string | null {
+    if (!this.isBrowser) {
+      return null;
+    }
+
+    try {
+      return localStorage.getItem(STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  }
+}
