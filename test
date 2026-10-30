@@ -1,123 +1,65 @@
-// features/select-data-date/model/select-data-date.service.ts
-import { inject, Injectable } from '@angular/core';
-import { MtModalService } from '@citi-icg-172888/ng-icgds/modal';
+import { Component, inject } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { MtDatePickerModule } from '@citi-icg-172888/ng-icgds/date-picker';
 
-import { DataDateContextService } from '@shared/api';
-import { escapeHtml } from '@shared/lib';
+import { SelectDataDateFeature } from '../../select-data-date.feature';
 
-@Injectable()
-export class SelectDataDateService {
-  private readonly context = inject(DataDateContextService);
-  private readonly modalService = inject(MtModalService);
+@Component({
+  selector: 'app-data-date-selector',
+  imports: [FormsModule, MtDatePickerModule],
+  providers: [SelectDataDateFeature],
+  templateUrl: './data-date-selector.component.html',
+  styleUrl: './data-date-selector.component.css',
+})
+export class DataDateSelectorComponent {
+  private readonly feature = inject(SelectDataDateFeature);
 
-  public readonly dataDate = this.context.dataDate;
+  public date: Date | null = this.readInitialDate();
 
-  public setDataDate(value: string): boolean {
-    const error = this.validateDataDate(value);
+  public onDateChange(value: Date | null): void {
+    this.date = value;
 
-    if (error !== null) {
-      this.openValidationError(error);
-      return false;
-    }
-
-    this.context.setDataDate(value);
-    return true;
-  }
-
-  public resetDataDate(): void {
-    this.context.resetDataDate();
-  }
-
-  private openValidationError(message: string): void {
-    this.modalService.open({
-      status: 'warning',
-      title: 'Nieprawidłowa data',
-      html: `<p>${escapeHtml(message)}</p>`,
-      type: 'alert',
-    });
-  }
-
-  private validateDataDate(value: string): string | null {
-    if (!value.trim()) {
-      return 'Wybierz datę.';
-    }
-
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      return 'Podaj datę w formacie RRRR-MM-DD.';
-    }
-
-    const date = new Date(`${value}T00:00:00.000Z`);
-
-    if (
-      Number.isNaN(date.getTime()) ||
-      date.toISOString().slice(0, 10) !== value
-    ) {
-      return 'Podaj prawidłową datę.';
-    }
-
-    return null;
-  }
-}
-
-
-
-
-
-
-
-// shared/api/model/data-date-context.service.ts
-import { isPlatformBrowser } from '@angular/common';
-import { inject, Injectable, PLATFORM_ID, signal } from '@angular/core';
-
-const STORAGE_KEY = 'dataDate';
-
-@Injectable({ providedIn: 'root' })
-export class DataDateContextService {
-  private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
-
-  private readonly selectedDate = signal<string | null>(
-    this.readStoredDate(),
-  );
-
-  public readonly dataDate = this.selectedDate.asReadonly();
-
-  public setDataDate(value: string): void {
-    this.selectedDate.set(value);
-
-    if (!this.isBrowser) {
+    if (value === null) {
+      this.feature.resetDataDate();
       return;
     }
 
-    try {
-      localStorage.setItem(STORAGE_KEY, value);
-    } catch {
-      // Дата остаётся в памяти.
-    }
-  }
-
-  public resetDataDate(): void {
-    this.selectedDate.set(null);
-
-    if (!this.isBrowser) {
+    if (Number.isNaN(value.getTime())) {
+      this.feature.setDataDate('');
       return;
     }
 
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // Дата в памяти сброшена.
-    }
+    const year = String(value.getFullYear()).padStart(4, '0');
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+
+    this.feature.setDataDate(`${year}-${month}-${day}`);
   }
 
-  private readStoredDate(): string | null {
-    if (!this.isBrowser) {
+  private readInitialDate(): Date | null {
+    const storedDate = this.feature.dataDate();
+
+    if (storedDate === null) {
       return null;
     }
 
-    try {
-      return localStorage.getItem(STORAGE_KEY);
-    } catch {
+    // localStorage может содержать повреждённое значение.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(storedDate)) {
       return null;
     }
+
+    const date = new Date(`${storedDate}T00:00:00`);
+
+    if (Number.isNaN(date.getTime())) {
+      return null;
+    }
+
+    const [year, month, day] = storedDate.split('-').map(Number);
+
+    return date.getFullYear() === year &&
+      date.getMonth() + 1 === month &&
+      date.getDate() === day
+      ? date
+      : null;
   }
 }
