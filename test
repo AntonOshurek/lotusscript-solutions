@@ -1,27 +1,35 @@
-public setPickerDate(value: Date | null): void {
-  if (value === null) {
-    this.resetDataDate();
-    return;
-  }
-
-  const dataDate = this.formatPickerDate(value);
-
-  if (dataDate === null) {
-    this.openValidationError('Podaj prawidłową datę.');
-    return;
-  }
-
-  this.setDataDate(dataDate);
+.data-date-highlight {
+  border-radius: 8px;
+  animation: highlight-data-date 3s ease-in-out;
 }
 
-private formatPickerDate(value: Date): string | null {
-  if (Number.isNaN(value.getTime())) {
-    return null;
+@keyframes highlight-data-date {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+    background-color: transparent;
   }
 
-  const year = String(value.getFullYear()).padStart(4, '0');
-  const month = String(value.getMonth() + 1).padStart(2, '0');
-  const day = String(value.getDate()).padStart(2, '0');
+  20%,
+  65% {
+    box-shadow: 0 0 0 3px #b36b00;
+    background-color: #fff4df;
+  }
+}
 
-  return `${year}-${month}-${day}`;
+@media (prefers-reduced-motion: reduce) {
+  .data-date-highlight {
+    animation: highlight-data-date-static 3s step-end;
+  }
+
+  @keyframes highlight-data-date-static {
+    from {
+      outline: 2px solid #b36b00;
+      outline-offset: 3px;
+    }
+
+    to {
+      outline: none;
+    }
+  }
 }
