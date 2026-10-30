@@ -1,65 +1,27 @@
-import { Component, inject } from '@angular/core';
-import { FormsModule } from '@angular/forms';
-import { MtDatePickerModule } from '@citi-icg-172888/ng-icgds/date-picker';
-
-import { SelectDataDateFeature } from '../../select-data-date.feature';
-
-@Component({
-  selector: 'app-data-date-selector',
-  imports: [FormsModule, MtDatePickerModule],
-  providers: [SelectDataDateFeature],
-  templateUrl: './data-date-selector.component.html',
-  styleUrl: './data-date-selector.component.css',
-})
-export class DataDateSelectorComponent {
-  private readonly feature = inject(SelectDataDateFeature);
-
-  public date: Date | null = this.readInitialDate();
-
-  public onDateChange(value: Date | null): void {
-    this.date = value;
-
-    if (value === null) {
-      this.feature.resetDataDate();
-      return;
-    }
-
-    if (Number.isNaN(value.getTime())) {
-      this.feature.setDataDate('');
-      return;
-    }
-
-    const year = String(value.getFullYear()).padStart(4, '0');
-    const month = String(value.getMonth() + 1).padStart(2, '0');
-    const day = String(value.getDate()).padStart(2, '0');
-
-    this.feature.setDataDate(`${year}-${month}-${day}`);
+public setPickerDate(value: Date | null): void {
+  if (value === null) {
+    this.resetDataDate();
+    return;
   }
 
-  private readInitialDate(): Date | null {
-    const storedDate = this.feature.dataDate();
+  const dataDate = this.formatPickerDate(value);
 
-    if (storedDate === null) {
-      return null;
-    }
-
-    // localStorage может содержать повреждённое значение.
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(storedDate)) {
-      return null;
-    }
-
-    const date = new Date(`${storedDate}T00:00:00`);
-
-    if (Number.isNaN(date.getTime())) {
-      return null;
-    }
-
-    const [year, month, day] = storedDate.split('-').map(Number);
-
-    return date.getFullYear() === year &&
-      date.getMonth() + 1 === month &&
-      date.getDate() === day
-      ? date
-      : null;
+  if (dataDate === null) {
+    this.openValidationError('Podaj prawidłową datę.');
+    return;
   }
+
+  this.setDataDate(dataDate);
+}
+
+private formatPickerDate(value: Date): string | null {
+  if (Number.isNaN(value.getTime())) {
+    return null;
+  }
+
+  const year = String(value.getFullYear()).padStart(4, '0');
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
 }
