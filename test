@@ -1,30 +1,30 @@
-export const UPDATE_ROW_VALIDATION_MESSAGES: Record<string, string> = {
-  // Существующие сообщения сохраняем
-
-  ROWEDIT_COLUMN_CLASS_DENIED:
-    'Nie masz uprawnień do odczytu klasy tej kolumny.',
-
-  ROWEDIT_VALUE_REQUIRED:
-    'To pole jest wymagane.',
-
-  ROWEDIT_VALUE_TOO_LONG:
-    'Wartość przekracza maksymalną dozwoloną długość.',
-
-  ROWEDIT_VALUE_NOT_ALLOWED:
-    'Podana wartość nie jest dozwolona.',
-
-  ROWEDIT_VALUE_OUT_OF_RANGE:
-    'Wartość znajduje się poza dozwolonym zakresem.',
-
-  ROWEDIT_VALUE_NOT_REPRESENTABLE:
-    'Wartość jest niezgodna z typem kolumny.',
-
-  ROWEDIT_VALUE_NOT_IN_DICTIONARY:
-    'Wartość nie występuje w słowniku.',
-
-  ROWEDIT_VALUE_INACTIVE_IN_DICTIONARY:
-    'Wartość w słowniku jest nieaktywna dla daty zgłoszenia.',
-
-  ROWEDIT_VALUE_CHECK_UNAVAILABLE:
-    'Nie można zweryfikować wartości z powodu braku uprawnień do odczytu słownika.',
+export const ATTRIBUTE_CLEAR_FORBIDDEN_MESSAGE: NotificationMessage = {
+  title: 'Nie można usunąć wartości atrybutu',
+  html: `
+    <p>Nie można usunąć wartości wymaganego atrybutu,
+    ponieważ encja jest aktywna.</p>
+    <p>Aby usunąć wartość, najpierw wstrzymaj
+    lub dezaktywuj encję.</p>
+  `,
 };
+
+
+
+openClearForbidden(): void {
+  this.openAlert(
+    'warning',
+    ATTRIBUTE_CLEAR_FORBIDDEN_MESSAGE,
+  );
+}
+
+
+
+
+if (type === 'clear') {
+  if (attribute.parentLifecycle === 'ACTIVE' && isGating) {
+    this.dialogService.openClearForbidden();
+    return;
+  }
+
+  // существующая логика CLEAR
+}
