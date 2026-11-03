@@ -1,35 +1,30 @@
-.data-date-highlight {
-  border-radius: 8px;
-  animation: highlight-data-date 3s ease-in-out;
-}
+export const UPDATE_ROW_VALIDATION_MESSAGES: Record<string, string> = {
+  // Существующие сообщения сохраняем
 
-@keyframes highlight-data-date {
-  0%,
-  100% {
-    box-shadow: 0 0 0 3px transparent;
-    background-color: transparent;
-  }
+  ROWEDIT_COLUMN_CLASS_DENIED:
+    'Nie masz uprawnień do odczytu klasy tej kolumny.',
 
-  20%,
-  65% {
-    box-shadow: 0 0 0 3px #b36b00;
-    background-color: #fff4df;
-  }
-}
+  ROWEDIT_VALUE_REQUIRED:
+    'To pole jest wymagane.',
 
-@media (prefers-reduced-motion: reduce) {
-  .data-date-highlight {
-    animation: highlight-data-date-static 3s step-end;
-  }
+  ROWEDIT_VALUE_TOO_LONG:
+    'Wartość przekracza maksymalną dozwoloną długość.',
 
-  @keyframes highlight-data-date-static {
-    from {
-      outline: 2px solid #b36b00;
-      outline-offset: 3px;
-    }
+  ROWEDIT_VALUE_NOT_ALLOWED:
+    'Podana wartość nie jest dozwolona.',
 
-    to {
-      outline: none;
-    }
-  }
-}
+  ROWEDIT_VALUE_OUT_OF_RANGE:
+    'Wartość znajduje się poza dozwolonym zakresem.',
+
+  ROWEDIT_VALUE_NOT_REPRESENTABLE:
+    'Wartość jest niezgodna z typem kolumny.',
+
+  ROWEDIT_VALUE_NOT_IN_DICTIONARY:
+    'Wartość nie występuje w słowniku.',
+
+  ROWEDIT_VALUE_INACTIVE_IN_DICTIONARY:
+    'Wartość w słowniku jest nieaktywna dla daty zgłoszenia.',
+
+  ROWEDIT_VALUE_CHECK_UNAVAILABLE:
+    'Nie można zweryfikować wartości z powodu braku uprawnień do odczytu słownika.',
+};
