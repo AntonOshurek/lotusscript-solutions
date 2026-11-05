@@ -1,70 +1,27 @@
-src/app/widgets/grant/
-└── grants-overview/
-    ├── configuration/
-    │   └── table.config.ts
-    ├── ui/
-    │   ├── styles/
-    │   │   └── grants-overview.widget.css
-    │   └── grants-overview.widget.html
-    ├── grants-overview.widget.ts
-    └── index.ts
+widgets/grant/grants-overview/
+├── configuration/
+│   └── table.config.ts
+├── ui/
+│   ├── search-grants/
+│   │   ├── model/
+│   │   │   └── search-grants.model.ts
+│   │   ├── search-grants.component.ts
+│   │   └── search-grants.component.html
+│   ├── styles/
+│   └── grants-overview.widget.html
+├── grants-overview.widget.ts
+└── index.ts
 
 
 
 
 
-
-
- // ENTITIES
-import { Grant, GRANT_FIELDS } from '@entities/grant';
-
-// AG-GRID
-import type {
-  ColDef,
-  GridOptions,
-  RowModelType,
-} from 'ag-grid-community';
-
-// GLOBAL CONFIGURATIONS
-import {
-  defaultServerSideColDef,
-  defaultPaginationPageSizeSelector,
-  defaultGridOptions,
-  defaultPaginationPageSize,
-  defaultCacheBlockSize,
-  defaultServerSideTableToolbar,
-  defaultSideBar,
-} from '@shared/ui/ag-grid/ag-grid-table.config';
-
-const fields = Object.keys(GRANT_FIELDS) as Array<
-  keyof typeof GRANT_FIELDS
->;
-
-const colDefs: ColDef<Grant>[] = fields.map((field) => ({
-  field,
-  width: GRANT_FIELDS[field]?.columnWidth ?? 200,
-  headerName: GRANT_FIELDS[field]?.label ?? field,
-  headerTooltip: field,
-}));
-
-const gridOptions: Partial<GridOptions<Grant>> = {
-  ...defaultGridOptions,
+ui/search-grants/model/search-grants.model.ts
+type SearchGrantsParams = {
+  onSearchChange: (query: string) => void;
 };
 
-const agGridConfig = {
-  colDefs,
-  defaultColDef: defaultServerSideColDef,
-  sideBar: defaultSideBar,
-  gridOptions,
-  pagination: true,
-  paginationPageSize: defaultPaginationPageSize,
-  cacheBlockSize: defaultCacheBlockSize,
-  paginationPageSizeSelector: defaultPaginationPageSizeSelector,
-  toolbar: defaultServerSideTableToolbar,
-  rowModelType: 'serverSide' as RowModelType,
-};
-
-export { agGridConfig };
+export type { SearchGrantsParams };
 
 
 
@@ -76,86 +33,76 @@ export { agGridConfig };
 
 
 
-// ANGULAR
+ui/search-grants/search-grants.component.ts
+
 import {
   Component,
+  DestroyRef,
   inject,
-  TemplateRef,
-  viewChild,
 } from '@angular/core';
-
-// ENTITIES
+import { FormsModule } from '@angular/forms';
 import {
-  Grant,
-  GRANT_FIELDS,
-  GrantQueriesApi,
-  GrantsQueryDto,
-} from '@entities/grant';
-
-// CONFIGURATION
-import { agGridConfig } from './configuration/table.config';
+  Subject,
+  debounceTime,
+  distinctUntilChanged,
+} from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 // AG-GRID
-import { AgGridAngular } from 'ag-grid-angular';
-import { GridReadyEvent } from 'ag-grid-community';
+import type { IToolbarItemAngularComp } from 'ag-grid-angular';
+import type { IToolbarItemParams } from 'ag-grid-community';
 
-// TABLE
-import { createDatabaseSource } from '@shared/table';
+// ENTITIES
+import type { Grant } from '@entities/grant';
 
-// API
-import type { ApiPaginatedQueryParams } from '@shared/api';
-
-// UI
-import { collapsibleToastByTemplateConfig } from '@shared/ui/mt-toast/mt-toast.config';
-
-// ERROR
-import {
-  generateToastErrorHtml,
-  mapErrorToUiError,
-} from '@shared/error';
-
-// TOAST
-import { MtToastsService } from '@citi-icg-172888/ng-icgds';
-import { MtToastTemplateContext } from '@citi-icg-172888/ng-icgds/toasts';
+// MODEL
+import type { SearchGrantsParams } from './model/search-grants.model';
 
 @Component({
-  selector: 'app-grants-overview-widget',
-  imports: [AgGridAngular],
-  templateUrl: './ui/grants-overview.widget.html',
-  styleUrl: './ui/styles/grants-overview.widget.css',
+  selector: 'app-search-grants',
+  imports: [FormsModule],
+  templateUrl: './search-grants.component.html',
 })
-export class GrantsOverviewWidget {
-  private readonly grantQueriesApi = inject(GrantQueriesApi);
-  private readonly toastSvc = inject(MtToastsService);
+export class SearchGrantsComponent
+  implements IToolbarItemAngularComp
+{
+  private readonly destroyRef = inject(DestroyRef);
 
-  protected readonly agGridConfig = agGridConfig;
+  private params!: IToolbarItemParams<
+    Grant,
+    unknown,
+    SearchGrantsParams
+  >;
 
-  private readonly toastRef =
-    viewChild.required<TemplateRef<MtToastTemplateContext>>('toastTmpl');
+  private readonly searchChanges = new Subject<string>();
 
-  protected onGridReady(params: GridReadyEvent<Grant>): void {
-    params.api.setGridOption(
-      'serverSideDatasource',
-      createDatabaseSource<Grant, GrantsQueryDto>({
-        queryParams: (queryParams: ApiPaginatedQueryParams) =>
-          this.grantQueriesApi.getGrants(queryParams),
+  public searchValue = '';
 
-        error: (err: unknown) => {
-          const uiError = mapErrorToUiError(
-            err,
-            'Nie udało się pobrać listy uprawnień',
-          );
+  constructor() {
+    this.searchChanges
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((query) => {
+        this.params.toolbarItemParams.onSearchChange(query);
+      });
+  }
 
-          this.toastSvc.error(
-            collapsibleToastByTemplateConfig(
-              uiError.title,
-              this.toastRef(),
-              generateToastErrorHtml(uiError),
-            ),
-          );
-        },
-      }),
-    );
+  public agInit(
+    params: IToolbarItemParams<
+      Grant,
+      unknown,
+      SearchGrantsParams
+    >,
+  ): void {
+    this.params = params;
+  }
+
+  public onSearchChange(value: string): void {
+    this.searchValue = value;
+    this.searchChanges.next(value.trim());
   }
 }
 
@@ -166,30 +113,124 @@ export class GrantsOverviewWidget {
 
 
 
-<ag-grid-angular
-  [columnDefs]="agGridConfig.colDefs"
-  [defaultColDef]="agGridConfig.defaultColDef"
-  [gridOptions]="agGridConfig.gridOptions"
-  [rowModelType]="agGridConfig.rowModelType"
-  [pagination]="agGridConfig.pagination"
-  [paginationPageSize]="agGridConfig.paginationPageSize"
-  [cacheBlockSize]="agGridConfig.cacheBlockSize"
-  [paginationPageSizeSelector]="agGridConfig.paginationPageSizeSelector"
-  [toolbar]="agGridConfig.toolbar"
-  [sideBar]="agGridConfig.sideBar"
-  (gridReady)="onGridReady($event)"
-  style="width: 100%; height: 100%"
+
+ui/search-grants/search-grants.component.html
+
+<input
+  type="search"
+  class="grant-search-input"
+  aria-label="Szukaj uprawnień"
+  placeholder="Szukaj uprawnień..."
+  [ngModel]="searchValue"
+  (ngModelChange)="onSearchChange($event)"
 />
 
-<ng-template #toastTmpl let-toasts="toasts">
-  <div class="lm-text-color-2">
-    <div class="lm-mb-4px"></div>
-    <br />
-    <div class="lm-mt-4px">
-      Spróbuj ponownie lub skontaktuj się z administratorem systemu
-    </div>
-  </div>
-</ng-template>
+
+
+
+
+
+configuration/table.config.ts
+import { SearchGrantsComponent } from '../ui/search-grants/search-grants.component';
+import type { SearchGrantsParams } from '../ui/search-grants/model/search-grants.model';
+
+const createGrantsGridConfig = (
+  onSearchChange: (query: string) => void,
+) => {
+  const toolbar = {
+    items: [
+      {
+        key: 'grant-search',
+        toolbarItem: SearchGrantsComponent,
+        alignment: 'right' as const,
+        toolbarItemParams: {
+          onSearchChange,
+        } as SearchGrantsParams,
+      },
+    ],
+  };
+
+  return {
+    colDefs,
+    defaultColDef: defaultServerSideColDef,
+    sideBar: defaultSideBar,
+    gridOptions,
+    pagination: true,
+    paginationPageSize: defaultPaginationPageSize,
+    cacheBlockSize: defaultCacheBlockSize,
+    paginationPageSizeSelector: defaultPaginationPageSizeSelector,
+    toolbar,
+    rowModelType: 'serverSide' as RowModelType,
+  };
+};
+
+export { createGrantsGridConfig };
+
+
+
+
+
+grants-overview.widget.ts
+
+
+import { signal } from '@angular/core';
+import type { GridApi } from 'ag-grid-community';
+
+import { createGrantsGridConfig } from './configuration/table.config';
+
+
+
+private readonly searchQuery = signal<string>('');
+
+private gridApi: GridApi<Grant> | null = null;
+
+protected readonly agGridConfig = createGrantsGridConfig(
+  (query: string) => {
+    if (this.searchQuery() === query) {
+      return;
+    }
+
+    this.searchQuery.set(query);
+    this.refreshGrid();
+  },
+);
+
+private refreshGrid(): void {
+  this.gridApi?.refreshServerSide({
+    purge: true,
+  });
+}
+
+
+
+protected onGridReady(params: GridReadyEvent<Grant>): void {
+  this.gridApi = params.api;
+
+  params.api.setGridOption(
+    'serverSideDatasource',
+    createDatabaseSource<Grant, GrantsQueryDto>({
+      queryParams: (queryParams: ApiPaginatedQueryParams) =>
+        this.grantQueriesApi.getGrants(queryParams, {
+          q: this.searchQuery() || undefined,
+        }),
+
+      error: (err: unknown) => {
+        const uiError = mapErrorToUiError(
+          err,
+          'Nie udało się pobrać listy uprawnień',
+        );
+
+        this.toastSvc.error(
+          collapsibleToastByTemplateConfig(
+            uiError.title,
+            this.toastRef(),
+            generateToastErrorHtml(uiError),
+          ),
+        );
+      },
+    }),
+  );
+}
 
 
 
@@ -198,4 +239,6 @@ export class GrantsOverviewWidget {
 
 
 
-export { GrantsOverviewWidget } from './grants-overview.widget';
+
+grants-overview.widget.html
+[toolbar]="agGridConfig.toolbar"
