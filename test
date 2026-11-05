@@ -1,30 +1,165 @@
-export const ATTRIBUTE_CLEAR_FORBIDDEN_MESSAGE: NotificationMessage = {
-  title: 'Nie można usunąć wartości atrybutu',
-  html: `
-    <p>Nie można usunąć wartości wymaganego atrybutu,
-    ponieważ encja jest aktywna.</p>
-    <p>Aby usunąć wartość, najpierw wstrzymaj
-    lub dezaktywuj encję.</p>
-  `,
+
+import { z } from 'zod';
+
+const GrantSchema = z.object({
+  subjectCode: z.string(),
+  resourceCode: z.string(),
+  actionCode: z.string(),
+  validFrom: z.string().nullable(),
+  validTo: z.string().nullable(),
+});
+
+type Grant = z.infer<typeof GrantSchema>;
+
+export type { Grant };
+export { GrantSchema };
+
+
+
+
+
+// MODEL
+import type { Grant } from './grant.model';
+import type { FieldModel } from '@shared/field';
+
+const GRANT_FIELDS: Partial<Record<keyof Grant, FieldModel>> = {
+  subjectCode: { label: 'Kod podmiotu' },
+  resourceCode: { label: 'Kod zasobu' },
+  actionCode: { label: 'Kod akcji' },
+  validFrom: { label: 'Ważne od' },
+  validTo: { label: 'Ważne do' },
+} as const;
+
+export { GRANT_FIELDS };
+
+
+
+
+
+
+
+
+
+
+
+import { z } from 'zod';
+
+// MODEL
+import { GrantSchema } from '../model/grant.model';
+
+// API
+import { createApiDataWithPaginationResponseSchema } from '@shared/api';
+
+const GrantsQueryDtoSchema =
+  createApiDataWithPaginationResponseSchema(
+    z.array(GrantSchema),
+  ).extend({
+    meta: z.object({
+      generatedAt: z.string(),
+    }),
+  });
+
+type GrantsQueryDto = z.infer<typeof GrantsQueryDtoSchema>;
+
+export type { GrantsQueryDto };
+export { GrantsQueryDtoSchema };
+
+
+
+
+
+
+
+
+GET_GRANTS: `${environment.API_ABAC_BASE_URL}/grants`,
+
+
+
+
+
+
+
+
+
+
+import { inject, Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { map } from 'rxjs';
+
+// DTO
+import { GrantsQueryDtoSchema } from './grantQueryDtoSchema';
+
+// API
+import {
+  ABAC_ENDPOINTS,
+  type ApiPaginatedQueryParams,
+  mapFetchDataQueryParams,
+} from '@shared/api';
+
+type GrantQueryFilters = {
+  subjectCode?: string;
+  resourceCode?: string;
+  actionCode?: string;
+  q?: string;
+  sort?: string[];
 };
 
+@Injectable()
+export class GrantQueriesApi {
+  private readonly http = inject(HttpClient);
 
+  public getGrants(
+    queryParams: ApiPaginatedQueryParams,
+    filters: GrantQueryFilters = {},
+  ) {
+    const params = {
+      ...mapFetchDataQueryParams(queryParams),
+      ...(filters.subjectCode !== undefined && {
+        subjectCode: filters.subjectCode,
+      }),
+      ...(filters.resourceCode !== undefined && {
+        resourceCode: filters.resourceCode,
+      }),
+      ...(filters.actionCode !== undefined && {
+        actionCode: filters.actionCode,
+      }),
+      ...(filters.q !== undefined && {
+        q: filters.q,
+      }),
+      ...(filters.sort !== undefined && {
+        sort: filters.sort,
+      }),
+    };
 
-openClearForbidden(): void {
-  this.openAlert(
-    'warning',
-    ATTRIBUTE_CLEAR_FORBIDDEN_MESSAGE,
-  );
-}
-
-
-
-
-if (type === 'clear') {
-  if (attribute.parentLifecycle === 'ACTIVE' && isGating) {
-    this.dialogService.openClearForbidden();
-    return;
+    return this.http
+      .get<unknown>(ABAC_ENDPOINTS.GET_GRANTS, {
+        params,
+      })
+      .pipe(
+        map((response: unknown) =>
+          GrantsQueryDtoSchema.parse(response),
+        ),
+      );
   }
-
-  // существующая логика CLEAR
 }
+
+export type { GrantQueryFilters };
+
+
+
+
+
+
+
+
+
+// MODEL
+export { GrantSchema } from './model/grant.model';
+export type { Grant } from './model/grant.model';
+export { GRANT_FIELDS } from './model/grant-fields.model';
+
+// API
+export { GrantQueriesApi } from './api/grant.queries.api';
+export { GrantsQueryDtoSchema } from './api/grantQueryDtoSchema';
+export type { GrantsQueryDto } from './api/grantQueryDtoSchema';
+export type { GrantQueryFilters } from './api/grant.queries.api';
